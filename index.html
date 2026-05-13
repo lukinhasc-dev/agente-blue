@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Agente Blue — Setup Automático</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="window">
+
+    <!-- Barra de título -->
+    <div class="titlebar">
+      <span class="titlebar-title">Agente Blue — Setup Automático</span>
+      <div class="titlebar-controls">
+        <span class="ctrl minimize">&#8212;</span>
+        <span class="ctrl maximize">&#9633;</span>
+        <span class="ctrl close" onclick="window.pywebview && pywebview.api.fechar()">&#10005;</span>
+      </div>
+    </div>
+
+    <!-- Conteúdo principal -->
+    <div class="content">
+
+      <!-- Cabeçalho -->
+      <div class="header">
+        <h1 class="app-title">Agente Blue</h1>
+        <p class="app-subtitle">Configuração Automática de Estações Windows</p>
+        <p class="app-version">v1.0 — BlueControl IT</p>
+      </div>
+
+      <!-- Etapas do setup -->
+      <div class="card">
+        <p class="card-label">Etapas de Configuração</p>
+
+        <div class="module-list">
+          <div class="module-item" id="step-downloads">
+            <span class="custom-radio" id="radio-downloads"></span>
+            <span class="module-text">
+              <strong>Downloads</strong> — Instalação de softwares necessários
+            </span>
+            <span class="step-badge" id="badge-downloads">Pendente</span>
+          </div>
+
+          <div class="module-item" id="step-rede">
+            <span class="custom-radio" id="radio-rede"></span>
+            <span class="module-text">
+              <strong>Rede</strong> — Descoberta de rede e compartilhamento
+            </span>
+            <span class="step-badge" id="badge-rede">Pendente</span>
+          </div>
+
+          <div class="module-item" id="step-smb">
+            <span class="custom-radio" id="radio-smb"></span>
+            <span class="module-text">
+              <strong>SMB</strong> — Desativar exigência de assinatura
+            </span>
+            <span class="step-badge" id="badge-smb">Pendente</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de progresso -->
+      <div class="progress-section">
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <p class="progress-label" id="progressLabel">Aguardando execução...</p>
+      </div>
+
+      <!-- Log de saída -->
+      <div class="log-box" id="logBox">
+        <span class="log-placeholder">Os logs de execução aparecerão aqui.</span>
+      </div>
+
+      <!-- Botão de execução -->
+      <button class="btn-executar" id="btnExecutar" onclick="iniciarAgente()">
+        ▶ &nbsp;EXECUTAR SETUP
+      </button>
+
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
