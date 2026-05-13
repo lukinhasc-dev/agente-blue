@@ -11,9 +11,6 @@
 <body>
 
   <div class="window">
-
-
-    <!-- Conteúdo principal -->
     <div class="content">
 
       <!-- Cabeçalho -->
@@ -26,14 +23,22 @@
       <!-- Etapas do setup -->
       <div class="card">
         <p class="card-label">Etapas de Configuração</p>
-
         <div class="module-list">
+
           <div class="module-item" id="step-downloads">
             <span class="custom-radio" id="radio-downloads"></span>
             <span class="module-text">
               <strong>Downloads</strong> — Instalação de softwares necessários
             </span>
             <span class="step-badge" id="badge-downloads">Pendente</span>
+          </div>
+
+          <div class="module-item" id="step-wallpaper">
+            <span class="custom-radio" id="radio-wallpaper"></span>
+            <span class="module-text">
+              <strong>Wallpaper</strong> — Fundo de tela corporativo
+            </span>
+            <span class="step-badge" id="badge-wallpaper">Pendente</span>
           </div>
 
           <div class="module-item" id="step-rede">
@@ -51,10 +56,54 @@
             </span>
             <span class="step-badge" id="badge-smb">Pendente</span>
           </div>
+
         </div>
       </div>
 
-      <!-- Barra de progresso -->
+      <!-- Barras de progresso individuais dos softwares -->
+      <div class="card sw-card" id="swCard">
+        <p class="card-label">Downloads de Software</p>
+        <div id="sw-list">
+
+          <div class="sw-item" id="sw-AnyDesk">
+            <div class="sw-header">
+              <span class="sw-name">AnyDesk</span>
+              <span class="sw-status" id="sw-status-AnyDesk">Aguardando</span>
+            </div>
+            <div class="sw-bar-wrap">
+              <div class="sw-bar" id="sw-bar-AnyDesk"></div>
+            </div>
+          </div>
+
+          <div class="sw-item" id="sw-Google-Chrome">
+            <div class="sw-header">
+              <span class="sw-name">Google Chrome</span>
+              <span class="sw-status" id="sw-status-Google-Chrome">Aguardando</span>
+            </div>
+            <div class="sw-bar-wrap">
+              <div class="sw-bar" id="sw-bar-Google-Chrome"></div>
+            </div>
+          </div>
+
+          <div class="sw-item" id="sw-Adobe-Acrobat-Reader">
+            <div class="sw-header">
+              <span class="sw-name">Adobe Acrobat Reader</span>
+              <span class="sw-status" id="sw-status-Adobe-Acrobat-Reader">Aguardando</span>
+            </div>
+            <div class="sw-bar-wrap">
+              <div class="sw-bar" id="sw-bar-Adobe-Acrobat-Reader"></div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Banner de conclusão dos downloads -->
+        <div class="sw-done-banner" id="swDoneBanner" style="display:none;">
+          ✔ Todos os softwares instalados com sucesso!
+        </div>
+      </div>
+
+      <!-- Barra de progresso geral -->
       <div class="progress-section">
         <div class="progress-bar-wrap">
           <div class="progress-bar" id="progressBar"></div>

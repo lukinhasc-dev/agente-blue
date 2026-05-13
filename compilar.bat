@@ -1,44 +1,77 @@
 @echo off
-:: Garante que o script rode na pasta onde ele esta localizado
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
+title Agente Blue — Compilador
 
 echo ==================================================
-echo   COMPILANDO AGENTE BLUE - Gerando Executavel
+echo   AGENTE BLUE — COMPILADOR AUTOMATICO
 echo ==================================================
 echo.
 
-:: Verifica se o Python esta no PATH
+:: ── 1. Verificar Python ───────────────────────────────────────────────────
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERRO] Python nao encontrado no PATH.
-    pause
-    exit /b
+    pause & exit /b 1
 )
 
-echo [1/3] Tentando fechar processos antigos do Agente Blue...
-taskkill /F /IM AgenteBlue.exe /T >nul 2>&1
-echo Aguardando 2 segundos...
-ping 127.0.0.1 -n 3 >nul
+:: ── 2. Matar todos os processos do Agente Blue ───────────────────────────
+echo [1/5] Encerrando processos antigos...
+for %%P in (AgenteBlue.exe AgenteBlue2.exe AgenteBlue_NOVO.exe AgenteBlue_novo.exe AgenteBlue_old.exe) do (
+    taskkill /F /IM "%%P" /T >nul 2>&1
+)
+ping 127.0.0.1 -n 4 >nul
 
-echo [2/3] Iniciando o PyInstaller...
-echo ATENCAO: Se der erro de 'Acesso Negado', feche o Agente Blue manualmente!
-python -m PyInstaller --noconfirm AgenteBlue.spec
+:: ── 3. Renomear exe antigo (funciona mesmo se ainda em uso pelo Windows) ──
+echo [2/5] Preparando pasta de saida...
+if exist "dist\AgenteBlue.exe" (
+    ren "dist\AgenteBlue.exe" "AgenteBlue_old.exe" >nul 2>&1
+    if exist "dist\AgenteBlue_old.exe" (
+        echo    Antigo renomeado para AgenteBlue_old.exe
+        :: Tenta deletar o renomeado imediatamente
+        del /F /Q "dist\AgenteBlue_old.exe" >nul 2>&1
+    )
+)
+:: Limpa outros residuos
+for %%F in (dist\AgenteBlue2.exe dist\AgenteBlue_NOVO.exe dist_new\AgenteBlue.exe) do (
+    if exist "%%F" del /F /Q "%%F" >nul 2>&1
+)
+if exist "dist_new\" rmdir /S /Q "dist_new" >nul 2>&1
+echo    Pronto.
+echo.
 
-if %errorlevel% equ 0 (
+:: ── 4. Compilar direto em dist\ ──────────────────────────────────────────
+echo [3/5] Compilando com PyInstaller...
+echo.
+python -m PyInstaller --noconfirm --distpath "dist" AgenteBlue.spec
+
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERRO] Falha na compilacao.
+    echo.
+    echo Solucao: Execute este .bat como Administrador.
+    pause & exit /b 1
+)
+
+:: ── 5. Limpar o _old se ainda existir ────────────────────────────────────
+if exist "dist\AgenteBlue_old.exe" del /F /Q "dist\AgenteBlue_old.exe" >nul 2>&1
+echo [4/5] Residuos removidos.
+
+:: ── 6. Resultado ──────────────────────────────────────────────────────────
+echo.
+set "FINAL=dist\AgenteBlue.exe"
+if exist "!FINAL!" (
+    for %%F in ("!FINAL!") do set /a MB=%%~zF / 1048576
+    echo [5/5] Executavel gerado com sucesso!
     echo.
     echo ==================================================
-    echo   SUCESSO! O executavel foi gerado em:
-    echo   %CD%\dist\AgenteBlue.exe
+    echo   SUCESSO!
+    echo   Arquivo: %CD%\dist\AgenteBlue.exe
+    echo   Tamanho: ~!MB! MB
     echo ==================================================
 ) else (
-    echo.
-    echo [ERRO] Houve um problema na compilacao.
-    echo --------------------------------------------------
-    echo DICA: Se o erro for 'Acesso Negado', tente:
-    echo 1. Fechar o Agente Blue manualmente no Gerenciador de Tarefas.
-    echo 2. Clicar com o botao direito neste arquivo e escolher 
-    echo    'Executar como administrador'.
-    echo --------------------------------------------------
+    echo [AVISO] Executavel nao encontrado. Verifique os logs acima.
 )
-
+echo.
 pause
+endlocal

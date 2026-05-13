@@ -84,6 +84,9 @@
   ('libcrypto-3.dll', 'C:\\Python314\\DLLs\\libcrypto-3.dll', 'BINARY'),
   ('libffi-8.dll', 'C:\\Python314\\DLLs\\libffi-8.dll', 'BINARY'),
   ('libssl-3.dll', 'C:\\Python314\\DLLs\\libssl-3.dll', 'BINARY'),
+  ('Fundo de Tela.jpg',
+   'C:\\Users\\Lucas Assis\\Desktop\\agente-blue\\Fundo de Tela.jpg',
+   'DATA'),
   ('index.html',
    'C:\\Users\\Lucas Assis\\Desktop\\agente-blue\\index.html',
    'DATA'),
@@ -100,7 +103,7 @@
  [],
  False,
  False,
- 1778687649,
+ 1778694577,
  [('runw.exe',
    'C:\\Users\\Lucas '
    'Assis\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',

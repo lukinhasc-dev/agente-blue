@@ -1,11 +1,17 @@
 // ============================================
 //  Agente Blue — script.js
-//  Comunicação via SSE (Server-Sent Events) + fetch
-//  Sem dependências externas — puro JavaScript
+//  SSE + fetch — puro JavaScript, sem dependências
 // ============================================
 
-const ETAPAS = ['downloads', 'rede', 'smb'];
+const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb'];
 let _eventSource = null;
+let _swTotal = 3;   // AnyDesk + Chrome + Adobe
+let _swDone  = 0;
+
+// Mapeia nome do software → id CSS (espaços → hífens)
+function swId(nome) {
+  return nome.replace(/\s+/g, '-');
+}
 
 // ── Utilitários de UI ────────────────────────
 
@@ -20,6 +26,9 @@ function setProgress(pct, text, finalOk) {
 
 function appendLog(msg, tipo) {
   const box  = document.getElementById('logBox');
+  // Remove placeholder na primeira mensagem real
+  const ph = box.querySelector('.log-placeholder');
+  if (ph) ph.remove();
   const line = document.createElement('span');
   line.className   = 'log-line ' + (tipo || 'muted');
   line.textContent = msg;
@@ -37,6 +46,51 @@ function setStepState(etapa, state, badgeText) {
   }
 }
 
+// ── Progresso individual de software ────────
+
+function updateSwProgress(nome, estado, pct) {
+  const id     = swId(nome);
+  const bar    = document.getElementById('sw-bar-' + id);
+  const status = document.getElementById('sw-status-' + id);
+  const item   = document.getElementById('sw-' + id);
+  if (!bar || !status || !item) return;
+
+  switch (estado) {
+    case 'baixando':
+      bar.style.width = pct + '%';
+      bar.className   = 'sw-bar downloading';
+      status.textContent = `Baixando… ${pct}%`;
+      status.className   = 'sw-status downloading';
+      item.className     = 'sw-item active';
+      break;
+    case 'instalando':
+      bar.style.width = '92%';
+      bar.className   = 'sw-bar installing';
+      status.textContent = 'Instalando…';
+      status.className   = 'sw-status installing';
+      break;
+    case 'ok':
+      bar.style.width = '100%';
+      bar.className   = 'sw-bar done';
+      status.textContent = '✔ Concluído';
+      status.className   = 'sw-status done';
+      item.className     = 'sw-item finished';
+      _swDone++;
+      if (_swDone >= _swTotal) {
+        document.getElementById('swDoneBanner').style.display = 'flex';
+      }
+      break;
+    case 'erro':
+      bar.style.width = '100%';
+      bar.className   = 'sw-bar error';
+      status.textContent = '✕ Erro';
+      status.className   = 'sw-status error';
+      item.className     = 'sw-item sw-error';
+      _swDone++;  // conta mesmo com erro para não travar o banner
+      break;
+  }
+}
+
 // ── Handlers de eventos SSE ──────────────────
 
 function handleEvent(event) {
@@ -49,17 +103,18 @@ function handleEvent(event) {
       break;
 
     case 'etapa_inicio':
-      setStepState(e.etapa, 'running', 'Executando...');
+      setStepState(e.etapa, 'running', 'Executando…');
       setProgress(e.pct, 'Etapa: ' + e.etapa + '  (' + e.pct + '%)');
       break;
 
     case 'etapa_fim':
-      if (e.sucesso) {
-        setStepState(e.etapa, 'done', 'Concluído ✓');
-      } else {
-        setStepState(e.etapa, 'error', 'Erro ✕');
-      }
+      setStepState(e.etapa, e.sucesso ? 'done' : 'error',
+                   e.sucesso ? 'Concluído ✓' : 'Erro ✕');
       setProgress(e.pct, e.pct + '%');
+      break;
+
+    case 'sw_progress':
+      updateSwProgress(e.nome, e.estado, e.pct || 0);
       break;
 
     case 'setup_fim':
@@ -69,7 +124,6 @@ function handleEvent(event) {
 }
 
 function _onSetupFim(sucesso) {
-  // Fecha o stream SSE
   if (_eventSource) {
     _eventSource.close();
     _eventSource = null;
@@ -96,61 +150,85 @@ function iniciarAgente() {
   const btn = document.getElementById('btnExecutar');
 
   // Reset visual
-  document.getElementById('logBox').innerHTML = '';
+  document.getElementById('logBox').innerHTML =
+    '<span class="log-placeholder">Os logs de execução aparecerão aqui.</span>';
   const bar = document.getElementById('progressBar');
   bar.style.width = '0%';
   bar.className   = 'progress-bar';
   btn.disabled    = true;
   btn.classList.remove('success');
-  btn.textContent = 'EXECUTANDO...';
+  btn.textContent = 'EXECUTANDO…';
   document.getElementById('progressLabel').textContent = '0%';
   document.getElementById('progressLabel').style.color = '';
+  document.getElementById('swDoneBanner').style.display = 'none';
 
+  // Reset etapas
   ETAPAS.forEach(e => setStepState(e, '', 'Pendente'));
-  appendLog('[*] Iniciando Agente Blue...', 'info');
-  setProgress(2, 'Iniciando...');
 
-  // Modo produção (Python HTTP server)
+  // Reset barras de software
+  _swDone = 0;
+  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader'].forEach(id => {
+    const bar    = document.getElementById('sw-bar-' + id);
+    const status = document.getElementById('sw-status-' + id);
+    const item   = document.getElementById('sw-' + id);
+    if (bar)    { bar.style.width = '0%'; bar.className = 'sw-bar'; }
+    if (status) { status.textContent = 'Aguardando'; status.className = 'sw-status'; }
+    if (item)   { item.className = 'sw-item'; }
+  });
+
+  appendLog('[*] Iniciando Agente Blue…', 'info');
+  setProgress(2, 'Iniciando…');
+
   if (window.location.protocol === 'http:') {
-    // Abre conexão SSE para receber eventos em tempo real
     if (_eventSource) _eventSource.close();
     _eventSource = new EventSource('/api/stream');
     _eventSource.onmessage = handleEvent;
     _eventSource.onerror   = () => {
       appendLog('[!] Conexão com servidor perdida.', 'warn');
     };
-
-    // Dispara a automação no servidor
     fetch('/api/execute', { method: 'POST' })
       .catch(() => appendLog('[!] Falha ao contactar o servidor Python.', 'err'));
-
     return;
   }
 
-  // Modo demo (arquivo aberto diretamente no browser, sem servidor)
+  // Demo mode
   _demoMode();
 }
 
-// ── Demo mode (preview sem servidor Python) ──
+// ── Demo mode ────────────────────────────────
 
 function _demoMode() {
   const roteiro = [
     () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'downloads', pct: 5 }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  Nenhum software configurado para esta etapa.', tipo: 'muted' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'downloads', sucesso: true, pct: 33 }) }),
 
-    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'rede', pct: 36 }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ▶  Descoberta de Rede → Privada ATIVADO', tipo: 'info' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  Sucesso', tipo: 'ok' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ▶  File and Printer Sharing → Public OFF', tipo: 'info' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  Sucesso', tipo: 'ok' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'rede', sucesso: true, pct: 66 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'AnyDesk', estado: 'baixando', pct: 10 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'AnyDesk', estado: 'baixando', pct: 55 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'AnyDesk', estado: 'baixando', pct: 90 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'AnyDesk', estado: 'instalando', pct: 92 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'AnyDesk', estado: 'ok', pct: 100 }) }),
 
-    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'smb', pct: 70 }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ▶  Set-SmbClientConfiguration RequireSecuritySignature=False', tipo: 'info' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  Sucesso', tipo: 'ok' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ▶  Registro: EnableSecuritySignature = 0', tipo: 'info' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  Sucesso', tipo: 'ok' }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Google Chrome', estado: 'baixando', pct: 20 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Google Chrome', estado: 'baixando', pct: 70 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Google Chrome', estado: 'instalando', pct: 92 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Google Chrome', estado: 'ok', pct: 100 }) }),
+
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Adobe Acrobat Reader', estado: 'baixando', pct: 30 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Adobe Acrobat Reader', estado: 'baixando', pct: 80 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Adobe Acrobat Reader', estado: 'instalando', pct: 92 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'sw_progress', nome: 'Adobe Acrobat Reader', estado: 'ok', pct: 100 }) }),
+
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'downloads', sucesso: true, pct: 30 }) }),
+
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'wallpaper', pct: 32 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  🖼  Wallpaper aplicado', tipo: 'ok' }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'wallpaper', sucesso: true, pct: 38 }) }),
+
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'rede', pct: 42 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  Regras de firewall aplicadas', tipo: 'ok' }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'rede', sucesso: true, pct: 80 }) }),
+
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'smb', pct: 83 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  SMB configurado', tipo: 'ok' }) }),
     () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'smb', sucesso: true, pct: 100 }) }),
 
     () => handleEvent({ data: JSON.stringify({ type: 'setup_fim', sucesso: true }) }),
@@ -161,7 +239,7 @@ function _demoMode() {
     if (i >= roteiro.length) return;
     roteiro[i]();
     i++;
-    setTimeout(next, 380 + Math.random() * 320);
+    setTimeout(next, 300 + Math.random() * 250);
   }
-  setTimeout(next, 500);
+  setTimeout(next, 400);
 }

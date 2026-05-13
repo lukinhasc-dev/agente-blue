@@ -5,7 +5,7 @@ a = Analysis(
     ['agente.py'],
     pathex=[],
     binaries=[],
-    datas=[('index.html', '.'), ('style.css', '.'), ('script.js', '.')],
+    datas=[('index.html', '.'), ('style.css', '.'), ('script.js', '.'), ('Fundo de Tela.jpg', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
