@@ -106,9 +106,10 @@ SOFTWARES: List[Tuple] = [
         "",
         # --force força reinstalação mesmo se já instalado
         # --scope machine instala para todos os usuários (necessário ao rodar como Admin)
+        # --disable-interactivity evita travamento no winget (disponível no winget >= 1.6 / Windows 11)
         "winget install --id Adobe.Acrobat.Reader.64-bit -e --silent "
         "--accept-package-agreements --accept-source-agreements "
-        "--force --scope machine",
+        "--force --scope machine --disable-interactivity",
         # 3010 = sucesso com restart; -1978335189 == 0x8A15002B winget já instalado
         {0, 3010, -1978335189, 2316632107},
     ),
@@ -269,6 +270,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True,
+            stdin=subprocess.DEVNULL,          # evita travamento: sem stdin = sem espera por input
             text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
         for line in (result.stdout or "").strip().splitlines():
@@ -293,6 +295,49 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
         _log(f"  ✗  Exceção: {exc}", "err")
         return False
 
+def _install_adobe_via_task(nome: str, ok_codes: set) -> bool:
+    """
+    Instala Adobe Acrobat Reader via Windows Scheduled Task rodando como SYSTEM.
+    Resolve o travamento do winget quando executado sem contexto de UI/UAC.
+    SYSTEM tem privilégios totais e não depende de sessão interativa.
+    """
+    task_name = "AgenteBlue_AdobeReader"
+    # Script PS em arquivo temp — evita problemas de escaping em subprocess
+    ps_script = """
+$t = 'AgenteBlue_AdobeReader'
+Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+$args = 'install --id Adobe.Acrobat.Reader.64-bit -e --silent --accept-package-agreements --accept-source-agreements --force --scope machine --disable-interactivity'
+$action = New-ScheduledTaskAction -Execute 'winget' -Argument $args
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest -LogonType ServiceAccount
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 25)
+Register-ScheduledTask -TaskName $t -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName $t
+$elapsed = 0
+while ($elapsed -lt 1200) {
+    $state = (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue).State
+    if ($state -eq 'Ready') { break }
+    Start-Sleep -Seconds 10
+    $elapsed += 10
+}
+$code = (Get-ScheduledTaskInfo -TaskName $t -ErrorAction SilentlyContinue).LastTaskResult
+Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+exit $code
+"""
+    ps_file = Path(tempfile.gettempdir()) / "agente_adobe.ps1"
+    try:
+        ps_file.write_text(ps_script, encoding="utf-8")
+        _log("  🗓  Criando Scheduled Task como SYSTEM para Adobe...", "muted")
+        return _run_cmd(
+            f'powershell -ExecutionPolicy Bypass -NoProfile -File "{ps_file}"',
+            label="Adobe Reader via Task Agendada (SYSTEM)",
+            timeout=1300,
+            ok_codes=ok_codes,
+        )
+    finally:
+        try:
+            ps_file.unlink()
+        except Exception:
+            pass
 
 def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
     dest = Path(tempfile.gettempdir()) / filename
@@ -356,6 +401,19 @@ def _etapa_downloads() -> bool:
         ok_codes: set = item[4] if len(item) > 4 else {0}
 
         _log(f"\n  → {nome}", "info")
+
+        # ── Adobe: via Scheduled Task (SYSTEM) — winget trava sem contexto UI ──
+        if "adobe" in nome.lower() and not url:
+            _sw_progress(nome, "instalando", 50)
+            ok = _install_adobe_via_task(nome, ok_codes)
+            if ok:
+                _sw_progress(nome, "ok", 100)
+            else:
+                _log(f"  ⚠  Adobe Reader falhou via Task Agendada.", "warn")
+                _sw_progress(nome, "erro", 0)
+                etapa_ok = False
+            time.sleep(1)
+            continue
 
         # ── Matar processos conflitantes antes de instalar ──────────────────
         _kill_map = {

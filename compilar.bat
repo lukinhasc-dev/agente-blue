@@ -50,16 +50,16 @@ echo.
 echo  [4/4] Publicando novo executavel...
 
 :: Apaga o exe antigo (force, mesmo que seja read-only)
-if exist "dist\AgenteBlue.exe" (
-    attrib -R "dist\AgenteBlue.exe" >nul 2>&1
-    del /F /Q "dist\AgenteBlue.exe" >nul 2>&1
+if exist "dist\AgenteBlue_PRO.exe" (
+    attrib -R "dist\AgenteBlue_PRO.exe" >nul 2>&1
+    del /F /Q "dist\AgenteBlue_PRO.exe" >nul 2>&1
 )
 
 :: Garante que dist\ existe
 if not exist "dist\" mkdir "dist"
 
 :: Copia o novo exe
-xcopy /Y "dist_new\AgenteBlue.exe" "dist\" >nul 2>&1
+xcopy /Y "dist_new\AgenteBlue_PRO.exe" "dist\" >nul 2>&1
 
 :: Remove pasta temporaria de compilacao
 rmdir /S /Q "dist_new" >nul 2>&1
@@ -67,11 +67,11 @@ rmdir /S /Q "build"    >nul 2>&1
 
 :: ─── Resultado ───────────────────────────────────────────────────────────
 echo.
-if exist "dist\AgenteBlue.exe" (
-    for %%F in ("dist\AgenteBlue.exe") do set /a MB=%%~zF / 1048576
+if exist "dist\AgenteBlue_PRO.exe" (
+    for %%F in ("dist\AgenteBlue_PRO.exe") do set /a MB=%%~zF / 1048576
     echo  ===================================================
     echo    SUCESSO!
-    echo    Executavel: %CD%\dist\AgenteBlue.exe
+    echo    Executavel: %CD%\dist\AgenteBlue_PRO.exe
     echo    Tamanho:    ~!MB! MB
     echo  ===================================================
 ) else (

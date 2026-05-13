@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='AgenteBlue',
+    name='AgenteBlue_PRO',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
