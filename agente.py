@@ -71,27 +71,46 @@ logging.basicConfig(
 log = logging.getLogger("agente-blue")
 
 # ─────────────────────────────────────────────
-#  SOFTWARES
-#  (nome, url, filename, silent_args)
+# (nome, url, filename, silent_args, ok_codes)
+# Se url == "" → instala via winget (args = comando winget completo)
+# ok_codes: set de códigos de saída considerados sucesso (padrão {0})
 # ─────────────────────────────────────────────
-SOFTWARES: List[Tuple[str, str, str, str]] = [
+SOFTWARES: List[Tuple] = [
     (
         "AnyDesk",
         "https://download.anydesk.com/AnyDesk.exe",
-        "AnyDesk_setup.exe",
-        "--install --silent --start-with-win --create-shortcuts --create-desktop-icon",
+        "AnyDesk.exe",   # DEVE ser AnyDesk.exe — o instalador verifica o próprio nome
+        '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
+        # 11 = já instalado / serviço já em execução → tratar como sucesso
+        {0, 11},
     ),
     (
         "Google Chrome",
         "https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe",
         "chrome_setup.exe",
         "/silent /install",
+        # 3010 = sucesso, reinicialização necessária
+        {0, 3010},
+    ),
+    (
+        "Google Drive",
+        "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe",
+        "googledrive_setup.exe",
+        "--silent --desktop_shortcut --skip_launch_new --gsuite_shortcuts=false",
+        # 1638 = outra versão já instalada (MSI), 3010 = reinicialização necessária
+        {0, 1638, 3010},
     ),
     (
         "Adobe Acrobat Reader",
-        "https://ardownload2.adobe.com/pub/adobe/acrobat/win/AcrobatDC/2300820555/AcroRdrDC2300820555_en_US.exe",
-        "adobe_reader_setup.exe",
-        "/sAll /rs /msi EULA_ACCEPT=YES",
+        "",   # url vazia = instala via winget, sem download
+        "",
+        # --force força reinstalação mesmo se já instalado
+        # --scope machine instala para todos os usuários (necessário ao rodar como Admin)
+        "winget install --id Adobe.Acrobat.Reader.64-bit -e --silent "
+        "--accept-package-agreements --accept-source-agreements "
+        "--force --scope machine",
+        # 3010 = sucesso com restart; -1978335189 == 0x8A15002B winget já instalado
+        {0, 3010, -1978335189, 2316632107},
     ),
 ]
 
@@ -238,7 +257,13 @@ def elevate_and_restart() -> None:
     sys.exit(0)
 
 
-def _run_cmd(cmd: str, label: str = "", timeout: int = 300) -> bool:
+def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
+             ok_codes: Optional[set] = None) -> bool:
+    """Executa comando e retorna True se returncode estiver em ok_codes.
+    ok_codes padrão = {0}.  Passe sets adicionais para aceitar 'já instalado' etc.
+    """
+    if ok_codes is None:
+        ok_codes = {0}
     desc = label or cmd[:80]
     _log(f"  ▶  {desc}", "info")
     try:
@@ -249,14 +274,18 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300) -> bool:
         for line in (result.stdout or "").strip().splitlines():
             if line.strip():
                 _log(f"     {line}", "muted")
-        if result.returncode != 0:
-            for line in (result.stderr or "").strip().splitlines():
-                if line.strip():
-                    _log(f"     {line}", "warn")
-            _log(f"  ✗  Código de saída: {result.returncode}", "warn")
-            return False
-        _log("  ✔  Sucesso", "ok")
-        return True
+        if result.returncode in ok_codes:
+            if result.returncode == 0:
+                _log("  ✔  Sucesso", "ok")
+            else:
+                _log(f"  ✔  Código {result.returncode} → considerado sucesso (ex: já instalado)", "ok")
+            return True
+        # Código de erro real
+        for line in (result.stderr or "").strip().splitlines():
+            if line.strip():
+                _log(f"     {line}", "warn")
+        _log(f"  ✗  Código de saída: {result.returncode}", "warn")
+        return False
     except subprocess.TimeoutExpired:
         _log("  ✗  Timeout", "err")
         return False
@@ -270,9 +299,24 @@ def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
     _log(f"  ⬇  Baixando  {filename}", "info")
     _sw_progress(nome_sw, "baixando", 0)
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        # User-Agent completo evita bloqueios por servidores Google/AnyDesk
+        _headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/octet-stream,*/*",
+        }
+        req = urllib.request.Request(url, headers=_headers)
+        # timeout=600 cobre arquivos grandes (Google Drive ~240 MB)
+        with urllib.request.urlopen(req, timeout=600) as resp:
             total = int(resp.headers.get("Content-Length", 0))
+            final_url = resp.geturl()
+            if final_url != url:
+                _log(f"  ↪  Redirecionado para: {final_url}", "muted")
+            if total > 0:
+                _log(f"  📦  Tamanho: {total / 1024 / 1024:.1f} MB", "muted")
             downloaded = 0
             with open(dest, "wb") as out:
                 while True:
@@ -284,7 +328,7 @@ def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
                     if total > 0:
                         pct = min(int(downloaded * 90 / total), 90)
                         _sw_progress(nome_sw, "baixando", pct)
-        _log(f"  ✔  Download concluído  ({downloaded / 1024:.1f} KB)", "ok")
+        _log(f"  ✔  Download concluído  ({downloaded / 1024 / 1024:.1f} MB)", "ok")
         _sw_progress(nome_sw, "baixando", 90)
         return dest
     except Exception as exc:
@@ -306,8 +350,41 @@ def _etapa_downloads() -> bool:
         _etapa_fim("downloads", True, 30)
         return True
 
-    for nome, url, filename, args in SOFTWARES:
+    for item in SOFTWARES:
+        # Suporte a 4-tupla (legado) e 5-tupla (com ok_codes)
+        nome, url, filename, args = item[0], item[1], item[2], item[3]
+        ok_codes: set = item[4] if len(item) > 4 else {0}
+
         _log(f"\n  → {nome}", "info")
+
+        # ── Matar processos conflitantes antes de instalar ──────────────────
+        _kill_map = {
+            "anydesk":     "anydesk.exe",
+            "google drive": "googledrivesync.exe",
+        }
+        for kw, proc in _kill_map.items():
+            if kw in nome.lower():
+                subprocess.run(
+                    f"taskkill /f /im {proc}",
+                    shell=True, capture_output=True, timeout=10
+                )
+                _log(f"  🔪  Encerrando processo: {proc} (se em execução)", "muted")
+
+        # ── winget: url vazia = sem download, executa comando diretamente ──
+        if not url:
+            _sw_progress(nome, "instalando", 50)
+            ok = _run_cmd(args, label=f"winget: {nome}", timeout=900,
+                          ok_codes=ok_codes)
+            if ok:
+                _sw_progress(nome, "ok", 100)
+            else:
+                _log(f"  ⚠  winget falhou para {nome}.", "warn")
+                _sw_progress(nome, "erro", 0)
+                etapa_ok = False
+            time.sleep(1)
+            continue
+
+        # ── download + instalação normal ──
         arquivo = _download_file(url, filename, nome)
         if arquivo is None:
             _log(f"  ⚠  Pulando {nome} — download falhou.", "warn")
@@ -316,14 +393,15 @@ def _etapa_downloads() -> bool:
             continue
 
         _sw_progress(nome, "instalando", 92)
-        ok = _run_cmd(f'"{arquivo}" {args}', label=f"Instalando {nome}", timeout=300)
+        ok = _run_cmd(f'"{arquivo}" {args}', label=f"Instalando {nome}",
+                      timeout=600, ok_codes=ok_codes)
         if ok:
             _sw_progress(nome, "ok", 100)
         else:
-            _log(f"  ⚠  Instalação de {nome} pode ter falhado.", "warn")
+            _log(f"  ⚠  Instalação de {nome} pode ter falhado (verifique o log).", "warn")
             _sw_progress(nome, "erro", 0)
             etapa_ok = False
-        time.sleep(1)
+        time.sleep(2)
 
     _etapa_fim("downloads", etapa_ok, 30)
     return etapa_ok
@@ -545,8 +623,8 @@ def _open_app_window(url: str):
         if Path(path).exists():
             subprocess.Popen([
                 path, f"--app={url}",
-                "--window-size=620,800",
-                "--window-position=100,60",
+                "--window-size=580,720",
+                "--window-position=100,40",
                 "--disable-extensions",
                 "--no-first-run",
             ])

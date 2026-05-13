@@ -5,7 +5,7 @@
 
 const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb'];
 let _eventSource = null;
-let _swTotal = 3;   // AnyDesk + Chrome + Adobe
+let _swTotal = 4;   // AnyDesk + Chrome + Drive + Adobe
 let _swDone  = 0;
 
 // Mapeia nome do software → id CSS (espaços → hífens)
@@ -167,7 +167,7 @@ function iniciarAgente() {
 
   // Reset barras de software
   _swDone = 0;
-  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader'].forEach(id => {
+  ['AnyDesk', 'Google-Chrome', 'Google-Drive', 'Adobe-Acrobat-Reader'].forEach(id => {
     const bar    = document.getElementById('sw-bar-' + id);
     const status = document.getElementById('sw-status-' + id);
     const item   = document.getElementById('sw-' + id);
