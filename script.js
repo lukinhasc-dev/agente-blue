@@ -3,7 +3,7 @@
 //  SSE + fetch — puro JavaScript, sem dependências
 // ============================================
 
-const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb'];
+const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'otimizacao'];
 let _eventSource = null;
 let _swTotal = 4;   // AnyDesk + Chrome + Drive + Adobe
 let _swDone  = 0;
@@ -190,7 +190,8 @@ function iniciarAgente() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        instalar_softwares: document.getElementById('chkSoftwares').checked 
+        instalar_softwares: document.getElementById('chkSoftwares').checked,
+        otimizacao: document.getElementById('chkOtimizacao').checked
       })
     })
       .catch(() => appendLog('[!] Falha ao contactar o servidor Python.', 'err'));
@@ -259,6 +260,15 @@ document.getElementById('chkSoftwares').addEventListener('change', (e) => {
     step.style.opacity = '1';
   } else {
     card.style.display = 'none';
+    step.style.opacity = '0.4';
+  }
+});
+
+document.getElementById('chkOtimizacao').addEventListener('change', (e) => {
+  const step = document.getElementById('step-otimizacao');
+  if (e.target.checked) {
+    step.style.opacity = '1';
+  } else {
     step.style.opacity = '0.4';
   }
 });

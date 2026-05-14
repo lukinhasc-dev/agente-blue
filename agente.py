@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import queue
+import shutil
 import socket
 import socketserver
 import subprocess
@@ -151,7 +152,8 @@ class AgenteHandler(http.server.SimpleHTTPRequestHandler):
                     pass
             
             instalar = params.get("instalar_softwares", True)
-            threading.Thread(target=run_automation, args=(instalar,), daemon=True).start()
+            otimizar = params.get("otimizacao", True)
+            threading.Thread(target=run_automation, args=(instalar, otimizar), daemon=True).start()
             self._json_response({"ok": True})
         else:
             self.send_error(404)
@@ -588,28 +590,138 @@ def _etapa_smb() -> bool:
 def _etapa_teste_rede() -> bool:
     _etapa_inicio("teste_rede", 95)
     caminho = r"\\NBK-SRV-TI01"
-    _log(f"\n  🔍  TESTE DE BUSCA NA REDE: Acessando {caminho}...", "info")
+    _log(f"\n  🔍  TESTE DE BUSCA NA REDE: Verificando {caminho}...", "info")
     
     try:
-        # Tenta abrir o explorer diretamente no caminho
-        # Se houver erro de rede, o Windows mostrará o popup, 
-        # mas o comando em si 'dispara' a tentativa.
+        # 1. Verificação programática de existência/acesso
+        if not os.path.exists(caminho):
+            _log(f"  ✗  Erro: O caminho {caminho} não foi localizado ou está inacessível.", "err")
+            _log("     Verifique se o servidor está ligado e se o nome está correto.", "muted")
+            _etapa_fim("teste_rede", False, 100)
+            return False
+
+        # 2. Abrir para confirmação visual
+        _log(f"  ✔  Acesso confirmado. Abrindo pasta por 5 segundos...", "ok")
         os.startfile(caminho)
-        _log(f"  ✔  Solicitação de abertura enviada para o Explorador.", "ok")
-        _log(f"  💡  Se a pasta {caminho} abrir sem erros, o compartilhamento está OK!", "info")
+        
+        # Espera um pouco para o usuário ver
+        time.sleep(5)
+        
+        # 3. Fechar a janela automaticamente via PowerShell (COM Shell.Application)
+        # Esse comando procura janelas do explorer que apontam para o servidor e as fecha.
+        ps_close = (
+            "$shell = New-Object -ComObject Shell.Application; "
+            "$shell.Windows() | Where-Object { $_.LocationURL -like '*NBK-SRV-TI01*' -or $_.LocationName -like '*NBK-SRV-TI01*' } "
+            "| ForEach-Object { $_.Quit() }"
+        )
+        subprocess.run(["powershell", "-Command", ps_close], capture_output=True)
+        
+        _log(f"  🔒  Pasta fechada automaticamente para segurança.", "muted")
         _etapa_fim("teste_rede", True, 100)
         return True
+
     except Exception as e:
-        _log(f"  ✗  Erro ao tentar abrir caminho de rede: {e}", "warn")
+        error_msg = str(e)
+        if "5" in error_msg: # Access Denied no Windows
+            _log(f"  ✗  ERRO DE ACESSO: Permissão negada para {caminho}.", "err")
+        elif "3" in error_msg or "2" in error_msg:
+            _log(f"  ✗  ERRO DE CAMINHO: Servidor {caminho} não encontrado na rede.", "err")
+        else:
+            _log(f"  ✗  Erro inesperado: {error_msg}", "err")
+            
         _etapa_fim("teste_rede", False, 100)
         return False
+
+
+def _etapa_otimizacao() -> bool:
+    _etapa_inicio("otimizacao", 98)
+    _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
+    
+    acoes_ok = 0
+    erros_list = []
+    
+    try:
+        espaco_inicial = shutil.disk_usage("C:").free
+    except:
+        espaco_inicial = 0
+
+    # 1. Planos de Energia (Alto Desempenho)
+    if _run_cmd("powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", label="Ativar Alto Desempenho"):
+        acoes_ok += 1
+    
+    # 2. Desativar Animações Visuais (Apenas animações de janela)
+    _run_cmd(r'reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f', label="Desativar Animações de Janela")
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 0 /f', label="Desativar Animações da Barra de Tarefas")
+    acoes_ok += 1
+
+    # 3. Apps em Segundo Plano
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" /v GlobalUserDisabled /t REG_DWORD /d 1 /f', label="Desativar Apps em Segundo Plano")
+    acoes_ok += 1
+
+    # 4. Storage Sense (Sensor de Armazenamento)
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
+    acoes_ok += 1
+
+    # 5. Limpeza de Pastas Temporárias
+    _log("  > Limpando diretórios temporários...", "muted")
+    pastas_limpeza = [
+        os.environ.get("TEMP"),
+        os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Temp"),
+        os.path.join(os.environ.get("LocalAppData", ""), "Temp")
+    ]
+    
+    for pasta in pastas_limpeza:
+        if pasta and os.path.exists(pasta):
+            try:
+                # Tentativa de remover conteúdo (ignora arquivos em uso)
+                for item in os.listdir(pasta):
+                    item_path = os.path.join(pasta, item)
+                    try:
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.unlink(item_path)
+                        elif os.path.is_dir(item_path):
+                            shutil.rmtree(item_path)
+                    except: continue # Arquivo em uso
+            except Exception as e: erros_list.append(f"Limpeza {pasta}: {e}")
+    acoes_ok += 1
+
+    # 6. Windows Update Cache
+    _log("  > Limpando Cache do Windows Update...", "muted")
+    _run_cmd("net stop wuauserv", label="Parando Windows Update (Temporário)")
+    _run_cmd(f'rd /s /q "{os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "SoftwareDistribution", "Download")}"', label="Limpando SoftwareDistribution")
+    _run_cmd("net start wuauserv", label="Iniciando Windows Update")
+    acoes_ok += 1
+
+    # 7. DISM StartComponentCleanup
+    _log("  > Executando DISM Component Cleanup (Limpando winxs)...", "muted")
+    _run_cmd("dism.exe /online /Cleanup-Image /StartComponentCleanup /NoRestart", label="DISM Cleanup")
+    acoes_ok += 1
+
+    # 8. Esvaziar Lixeira
+    _run_cmd('powershell.exe -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"', label="Esvaziar Lixeira")
+    acoes_ok += 1
+
+    try:
+        espaco_final = shutil.disk_usage("C:").free
+        liberado_mb = max(0, (espaco_final - espaco_inicial) / (1024 * 1024))
+    except:
+        liberado_mb = 0
+
+    _log("\n  ✅  RELATÓRIO DE OTIMIZAÇÃO", "ok")
+    _log(f"      Ações executadas com sucesso: {acoes_ok}", "muted")
+    _log(f"      Espaço liberado estimado: {liberado_mb:.2f} MB", "muted")
+    if erros_list:
+        _log(f"      Alertas/Erros (ignorado arquivos em uso): {len(erros_list)}", "warn")
+
+    _etapa_fim("otimizacao", True, 100)
+    return True
 
 
 # ══════════════════════════════════════════════
 #  ORQUESTRADOR
 # ══════════════════════════════════════════════
 
-def run_automation(instalar_softwares: bool = True):
+def run_automation(instalar_softwares: bool = True, otimizacao: bool = True):
     inicio = datetime.now()
     erros: List[str] = []
 
@@ -634,8 +746,16 @@ def run_automation(instalar_softwares: bool = True):
     if not _etapa_smb():
         erros.append("smb")
     
-    # Novo Teste de Rede ao final
+    # Novo Teste de Rede
     _etapa_teste_rede()
+
+    # Etapa Final: Otimização (Opcional)
+    if otimizacao:
+        _etapa_otimizacao()
+    else:
+        _log("\n  [INFO] Pulando etapa de otimização.", "info")
+        _etapa_inicio("otimizacao", 90)
+        _etapa_fim("otimizacao", True, 100)
 
     duracao = int((datetime.now() - inicio).total_seconds())
     _log("\n" + "=" * 52, "muted")
