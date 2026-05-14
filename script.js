@@ -186,7 +186,13 @@ function iniciarAgente() {
     _eventSource.onerror   = () => {
       appendLog('[!] Conexão com servidor perdida.', 'warn');
     };
-    fetch('/api/execute', { method: 'POST' })
+    fetch('/api/execute', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        instalar_softwares: document.getElementById('chkSoftwares').checked 
+      })
+    })
       .catch(() => appendLog('[!] Falha ao contactar o servidor Python.', 'err'));
     return;
   }
@@ -243,3 +249,16 @@ function _demoMode() {
   }
   setTimeout(next, 400);
 }
+
+// ── Eventos de Inicialização ────────────────
+document.getElementById('chkSoftwares').addEventListener('change', (e) => {
+  const card = document.getElementById('swCard');
+  const step = document.getElementById('step-downloads');
+  if (e.target.checked) {
+    card.style.display = 'block';
+    step.style.opacity = '1';
+  } else {
+    card.style.display = 'none';
+    step.style.opacity = '0.4';
+  }
+});

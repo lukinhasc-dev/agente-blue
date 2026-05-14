@@ -141,7 +141,17 @@ class AgenteHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/execute":
-            threading.Thread(target=run_automation, daemon=True).start()
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length)
+            params = {}
+            if post_data:
+                try:
+                    params = json.loads(post_data.decode("utf-8"))
+                except Exception:
+                    pass
+            
+            instalar = params.get("instalar_softwares", True)
+            threading.Thread(target=run_automation, args=(instalar,), daemon=True).start()
             self._json_response({"ok": True})
         else:
             self.send_error(404)
@@ -541,6 +551,11 @@ def _etapa_rede() -> bool:
     ]:
         _run_cmd(cmd, label=label)  # não bloqueia se grupo não existir no idioma
 
+    # ── 4. Reforço via Registro (Descoberta de Rede) ──────────────────────────
+    _log("\n  > Reforçando Descoberta de Rede via Registro...", "muted")
+    reg_path = r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
+    _run_cmd(f'reg add "{reg_path}" /v "AllowInsecureGuestAuth" /t REG_DWORD /d 1 /f', label="Permitir Logon de Convidado Inseguro")
+    
     _etapa_fim("rede", etapa_ok, 80)
     return etapa_ok
 
@@ -570,11 +585,31 @@ def _etapa_smb() -> bool:
     return etapa_ok
 
 
+def _etapa_teste_rede() -> bool:
+    _etapa_inicio("teste_rede", 95)
+    caminho = r"\\NBK-SRV-TI01"
+    _log(f"\n  🔍  TESTE DE BUSCA NA REDE: Acessando {caminho}...", "info")
+    
+    try:
+        # Tenta abrir o explorer diretamente no caminho
+        # Se houver erro de rede, o Windows mostrará o popup, 
+        # mas o comando em si 'dispara' a tentativa.
+        os.startfile(caminho)
+        _log(f"  ✔  Solicitação de abertura enviada para o Explorador.", "ok")
+        _log(f"  💡  Se a pasta {caminho} abrir sem erros, o compartilhamento está OK!", "info")
+        _etapa_fim("teste_rede", True, 100)
+        return True
+    except Exception as e:
+        _log(f"  ✗  Erro ao tentar abrir caminho de rede: {e}", "warn")
+        _etapa_fim("teste_rede", False, 100)
+        return False
+
+
 # ══════════════════════════════════════════════
 #  ORQUESTRADOR
 # ══════════════════════════════════════════════
 
-def run_automation():
+def run_automation(instalar_softwares: bool = True):
     inicio = datetime.now()
     erros: List[str] = []
 
@@ -583,13 +618,24 @@ def run_automation():
     _log(f"  Log completo: {_LOG_FILE}", "muted")
     _log("=" * 52, "muted")
 
-    if not _etapa_downloads():
-        erros.append("downloads")
+    # Etapa 1: Downloads (Opcional)
+    if instalar_softwares:
+        if not _etapa_downloads():
+            erros.append("downloads")
+    else:
+        _log("\n  [INFO] Pulando etapa de downloads conforme solicitado.", "info")
+        _etapa_inicio("downloads", 5)
+        _log("  Etapa ignorada pelo usuário.", "muted")
+        _etapa_fim("downloads", True, 30)
+
     _etapa_wallpaper()          # wallpaper: falha não é crítica
     if not _etapa_rede():
         erros.append("rede")
     if not _etapa_smb():
         erros.append("smb")
+    
+    # Novo Teste de Rede ao final
+    _etapa_teste_rede()
 
     duracao = int((datetime.now() - inicio).total_seconds())
     _log("\n" + "=" * 52, "muted")

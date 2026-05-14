@@ -126,6 +126,77 @@ html, body {
   margin-bottom: 10px;
 }
 
+/* ── Opções ── */
+.opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.opt-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.opt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.opt-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ── Switch Toggle (iOS style) ── */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: var(--bg-input);
+  transition: .3s;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--text-muted);
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: var(--blue-dim);
+  border-color: var(--blue);
+}
+
+input:checked + .slider:before {
+  transform: translateX(16px);
+  background-color: #fff;
+  box-shadow: 0 0 8px var(--blue-glow);
+}
+
 .module-list {
   display: flex;
   flex-direction: column;
