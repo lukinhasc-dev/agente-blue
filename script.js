@@ -5,7 +5,7 @@
 
 const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'otimizacao'];
 let _eventSource = null;
-let _swTotal = 4;   // AnyDesk + Chrome + Drive + Adobe
+let _swTotal = 6;   // AnyDesk + Chrome + Drive + Adobe + Slack + Office
 let _swDone  = 0;
 
 // Mapeia nome do software → id CSS (espaços → hífens)
@@ -158,16 +158,33 @@ function iniciarAgente() {
   btn.disabled    = true;
   btn.classList.remove('success');
   btn.textContent = 'EXECUTANDO…';
+
+  // Coleta softwares selecionados
+  const selectedSW = Array.from(document.querySelectorAll('.sw-checkbox:checked'))
+                          .map(cb => cb.getAttribute('data-sw'));
+  _swTotal = selectedSW.length;
+  _swDone  = 0;
+
   document.getElementById('progressLabel').textContent = '0%';
   document.getElementById('progressLabel').style.color = '';
   document.getElementById('swDoneBanner').style.display = 'none';
+
+  // Oculta itens não selecionados para focar no que importa
+  document.querySelectorAll('.sw-item').forEach(item => {
+    const cb = item.querySelector('.sw-checkbox');
+    if (cb && !cb.checked) {
+      item.style.display = 'none';
+    } else {
+      item.style.display = 'block';
+    }
+  });
 
   // Reset etapas
   ETAPAS.forEach(e => setStepState(e, '', 'Pendente'));
 
   // Reset barras de software
   _swDone = 0;
-  ['AnyDesk', 'Google-Chrome', 'Google-Drive', 'Adobe-Acrobat-Reader'].forEach(id => {
+  ['AnyDesk', 'Google-Chrome', 'Google-Drive', 'Adobe-Acrobat-Reader', 'Slack', 'Microsoft-365'].forEach(id => {
     const bar    = document.getElementById('sw-bar-' + id);
     const status = document.getElementById('sw-status-' + id);
     const item   = document.getElementById('sw-' + id);
@@ -191,6 +208,7 @@ function iniciarAgente() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         instalar_softwares: document.getElementById('chkSoftwares').checked,
+        softwares_selecionados: selectedSW,
         otimizacao: document.getElementById('chkOtimizacao').checked
       })
     })

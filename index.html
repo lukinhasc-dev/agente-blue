@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agente Blue — Setup Automático</title>
+  <link rel="icon" type="image/x-icon" href="bluepay.ico">
   <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -15,6 +16,9 @@
 
       <!-- Cabeçalho -->
       <div class="header">
+        <div class="logo-wrap">
+          <img src="bluepay.ico" alt="Logo" class="app-logo">
+        </div>
         <h1 class="app-title">Agente Blue</h1>
         <p class="app-subtitle">Configuração Automática de Estações Windows</p>
         <p class="app-version">v1.0 — BlueControl IT</p>
@@ -26,7 +30,7 @@
         <div class="opt-row">
           <div class="opt-info">
             <span class="opt-title">Instalar Softwares</span>
-            <span class="opt-desc">AnyDesk, Chrome, Drive e Adobe Reader</span>
+            <span class="opt-desc">AnyDesk, Chrome, Drive, Adobe, Slack e Office</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="chkSoftwares" checked>
@@ -101,7 +105,10 @@
 
           <div class="sw-item" id="sw-AnyDesk">
             <div class="sw-header">
-              <span class="sw-name">AnyDesk</span>
+              <label class="sw-check-wrap">
+                <input type="checkbox" class="sw-checkbox" data-sw="AnyDesk" checked>
+                <span class="sw-name">AnyDesk</span>
+              </label>
               <span class="sw-status" id="sw-status-AnyDesk">Aguardando</span>
             </div>
             <div class="sw-bar-wrap">
@@ -109,9 +116,12 @@
             </div>
           </div>
 
-<div class="sw-item" id="sw-Google-Chrome">
+          <div class="sw-item" id="sw-Google-Chrome">
             <div class="sw-header">
-              <span class="sw-name">Google Chrome</span>
+              <label class="sw-check-wrap">
+                <input type="checkbox" class="sw-checkbox" data-sw="Google Chrome" checked>
+                <span class="sw-name">Google Chrome</span>
+              </label>
               <span class="sw-status" id="sw-status-Google-Chrome">Aguardando</span>
             </div>
             <div class="sw-bar-wrap">
@@ -121,7 +131,10 @@
 
           <div class="sw-item" id="sw-Google-Drive">
             <div class="sw-header">
-              <span class="sw-name">Google Drive</span>
+              <label class="sw-check-wrap">
+                <input type="checkbox" class="sw-checkbox" data-sw="Google Drive" checked>
+                <span class="sw-name">Google Drive</span>
+              </label>
               <span class="sw-status" id="sw-status-Google-Drive">Aguardando</span>
             </div>
             <div class="sw-bar-wrap">
@@ -131,11 +144,40 @@
 
           <div class="sw-item" id="sw-Adobe-Acrobat-Reader">
             <div class="sw-header">
-              <span class="sw-name">Adobe Acrobat Reader</span>
+              <label class="sw-check-wrap">
+                <input type="checkbox" class="sw-checkbox" data-sw="Adobe Acrobat Reader" checked>
+                <span class="sw-name">Adobe Acrobat Reader</span>
+              </label>
               <span class="sw-status" id="sw-status-Adobe-Acrobat-Reader">Aguardando</span>
             </div>
             <div class="sw-bar-wrap">
               <div class="sw-bar" id="sw-bar-Adobe-Acrobat-Reader"></div>
+            </div>
+          </div>
+          
+          <div class="sw-item" id="sw-Slack">
+            <div class="sw-header">
+              <label class="sw-check-wrap">
+                <input type="checkbox" class="sw-checkbox" data-sw="Slack" checked>
+                <span class="sw-name">Slack</span>
+              </label>
+              <span class="sw-status" id="sw-status-Slack">Aguardando</span>
+            </div>
+            <div class="sw-bar-wrap">
+              <div class="sw-bar" id="sw-bar-Slack"></div>
+            </div>
+          </div>
+          
+          <div class="sw-item" id="sw-Microsoft-365">
+            <div class="sw-header">
+              <label class="sw-check-wrap">
+                <input type="checkbox" class="sw-checkbox" data-sw="Microsoft 365" checked>
+                <span class="sw-name">Microsoft 365 (Office)</span>
+              </label>
+              <span class="sw-status" id="sw-status-Microsoft-365">Aguardando</span>
+            </div>
+            <div class="sw-bar-wrap">
+              <div class="sw-bar" id="sw-bar-Microsoft-365"></div>
             </div>
           </div>
 

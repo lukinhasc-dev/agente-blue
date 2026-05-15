@@ -87,6 +87,12 @@ if (Test-Path $destExe) {
 try {
     Copy-Item -Path $novoExe -Destination $destExe -Force -ErrorAction Stop
     Write-Host "  [OK] Executável atualizado com sucesso em dist\" -ForegroundColor Gray
+    
+    # Sincroniza com a pasta AGENTE_FINAL para o pendrive
+    $finalFolder = Join-Path $PSScriptRoot "AGENTE_FINAL"
+    if (-not (Test-Path $finalFolder)) { New-Item -ItemType Directory -Path $finalFolder | Out-Null }
+    Copy-Item -Path $destExe -Destination (Join-Path $finalFolder "AgenteBlue_PRO.exe") -Force
+    Write-Host "  [OK] Cópia atualizada em AGENTE_FINAL\ para Pendrive." -ForegroundColor Cyan
 } catch {
     Write-Host " [ERRO] Falha ao copiar o novo executável para dist\" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red

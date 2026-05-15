@@ -1,0 +1,59 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+dist_new/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script, and contain the binary number of cells.
+#  In case of manual overrides, they might be in the root directory.
+*.manifest
+*.spec
+
+# Installer Files (Heavy)
+apps/
+AGENTE_FINAL/
+*.exe
+*.msi
+*.msix
+
+# Logs
+*.log
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+
+# Agent Blue Specific
+bluepay.ico
+Fundo de Tela.jpg

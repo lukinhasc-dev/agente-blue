@@ -41,6 +41,9 @@ from typing import Optional, List, Tuple
 _ADMIN_USER: str = r".\Administrator"
 _ADMIN_PASS: str = "Sham23*"
 
+_NET_USER: str = "scanner"
+_NET_PASS: str = "teste123"
+
 # ─────────────────────────────────────────────
 #  CAMINHOS
 # ─────────────────────────────────────────────
@@ -76,37 +79,49 @@ log = logging.getLogger("agente-blue")
 # Se url == "" → instala via winget (args = comando winget completo)
 # ok_codes: set de códigos de saída considerados sucesso (padrão {0})
 # ─────────────────────────────────────────────
+# (Nome, Arquivo em 'apps/', Argumentos, Códigos de OK, Caminho de Detecção)
 SOFTWARES: List[Tuple] = [
     (
         "AnyDesk",
-        "https://download.anydesk.com/AnyDesk.exe",
-        "AnyDesk.exe",   # DEVE ser AnyDesk.exe — o instalador verifica o próprio nome
+        "AnyDesk.exe",
         '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
-        # 11 = já instalado / serviço já em execução → tratar como sucesso
         {0, 11},
+        r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
     ),
     (
         "Google Chrome",
-        "https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe",
-        "chrome_setup.exe",
+        "ChromeSetup.exe",
         "/silent /install",
-        # 3010 = sucesso, reinicialização necessária
-        {0, 3010},
+        {0, 1603, 3010},
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     ),
     (
         "Google Drive",
-        "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe",
-        "googledrive_setup.exe",
+        "GoogleDriveSetup.exe",
         "--silent --desktop_shortcut --skip_launch_new --gsuite_shortcuts=false",
-        # 1638 = outra versão já instalada (MSI), 3010 = reinicialização necessária
         {0, 1638, 3010},
+        r"C:\Program Files\Google\Drive File Stream"
     ),
     (
         "Adobe Acrobat Reader",
-        "https://ardownload2.adobe.com/pub/adobe/acrobat/win/AcrobatDC/2600121529/AcroRdrDCx642600121529_MUI.exe",
-        "AcroRdrDC_setup.exe",
-        "-sfx_nu /sAll /rs /msi EULA_ACCEPT=YES",
+        "Reader_br_install.exe",
+        "/sAll /rs /msi EULA_ACCEPT=YES",
         {0, 3010, 1641},
+        r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe"
+    ),
+    (
+        "Slack",
+        "Slack.msix",
+        "", # Instalado via Add-AppxPackage
+        {0},
+        None # MSIX é difícil de detectar por caminho fixo, winget/powershell lidam com isso
+    ),
+    (
+        "Microsoft 365",
+        "OfficeSetup.exe",
+        "",
+        {0, 1603, 3010},
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE"
     ),
 ]
 
@@ -129,6 +144,7 @@ def _broadcast(event: dict):
 
 class AgenteHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
+        # Garante que o diretório base seja o local onde os arquivos foram extraídos (_MEIPASS)
         super().__init__(*args, directory=str(_BASE_DIR), **kwargs)
 
     def log_message(self, format, *args):
@@ -153,7 +169,9 @@ class AgenteHandler(http.server.SimpleHTTPRequestHandler):
             
             instalar = params.get("instalar_softwares", True)
             otimizar = params.get("otimizacao", True)
-            threading.Thread(target=run_automation, args=(instalar, otimizar), daemon=True).start()
+            sw_lista = params.get("softwares_selecionados", [])
+            
+            threading.Thread(target=run_automation, args=(instalar, otimizar, sw_lista), daemon=True).start()
             self._json_response({"ok": True})
         else:
             self.send_error(404)
@@ -313,7 +331,7 @@ def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
+                "Chrome/130.0.0.0 Safari/537.36"
             ),
             "Accept": "application/octet-stream,*/*",
         }
@@ -350,7 +368,7 @@ def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
 #  ETAPAS
 # ══════════════════════════════════════════════
 
-def _etapa_downloads() -> bool:
+def _etapa_downloads(sw_lista: list = None) -> bool:
     _etapa_inicio("downloads", 5)
     etapa_ok = True
 
@@ -360,54 +378,87 @@ def _etapa_downloads() -> bool:
         return True
 
     for item in SOFTWARES:
-        # Suporte a 4-tupla (legado) e 5-tupla (com ok_codes)
-        nome, url, filename, args = item[0], item[1], item[2], item[3]
-        ok_codes: set = item[4] if len(item) > 4 else {0}
+        nome, filename, args = item[0], item[1], item[2]
+        
+        # Filtro de seleção individual
+        if sw_lista is not None and nome not in sw_lista:
+            _log(f"  ⏭  {nome} não selecionado. Pulando...", "muted")
+            continue
+
+        ok_codes: set = item[3] if len(item) > 3 else {0}
+        detect_path: str = item[4] if len(item) > 4 else None
 
         _log(f"\n  → {nome}", "info")
 
-        # (Adobe agora tem URL direta — cai no fluxo normal de download+install abaixo)
-
-        # ── Matar processos conflitantes antes de instalar ──────────────────
-        _kill_map = {
-            "anydesk":     "anydesk.exe",
-            "google drive": "googledrivesync.exe",
-        }
-        for kw, proc in _kill_map.items():
-            if kw in nome.lower():
-                subprocess.run(
-                    f"taskkill /f /im {proc}",
-                    shell=True, capture_output=True, timeout=10
-                )
-                _log(f"  🔪  Encerrando processo: {proc} (se em execução)", "muted")
-
-        # ── winget: url vazia = sem download, executa comando diretamente ──
-        if not url:
-            _sw_progress(nome, "instalando", 50)
-            ok = _run_cmd(args, label=f"winget: {nome}", timeout=900,
-                          ok_codes=ok_codes)
-            if ok:
-                _sw_progress(nome, "ok", 100)
-            else:
-                _log(f"  ⚠  winget falhou para {nome}.", "warn")
-                _sw_progress(nome, "erro", 0)
-                etapa_ok = False
-            time.sleep(1)
+        # --- VERIFICAÇÃO DE INSTALAÇÃO PRÉVIA ---
+        if detect_path and Path(detect_path).exists():
+            _log(f"  ✔  {nome} já está instalado no sistema. Pulando...", "ok")
+            _sw_progress(nome, "ok", 100)
             continue
 
-        # ── download + instalação normal ──
-        arquivo = _download_file(url, filename, nome)
+        # ── Localização do Instalador (Pasta apps/) ──
+        local_path = _BASE_DIR / "apps" / filename
+        extern_path = Path(sys.executable).parent / "apps" / filename
+        
+        arquivo = None
+        if local_path.exists():
+            arquivo = local_path
+            _log(f"  📦  Instalador encontrado: {filename}", "ok")
+        elif extern_path.exists():
+            arquivo = extern_path
+            _log(f"  📦  Instalador encontrado (externo): {filename}", "ok")
+        
         if arquivo is None:
-            _log(f"  ⚠  Pulando {nome} — download falhou.", "warn")
+            _log(f"  ✗  Erro: Arquivo {filename} não encontrado na pasta 'apps'.", "err")
+            # Fallback winget para Chrome/Office mesmo se o arquivo local sumir
+            fallback_id = None
+            if "chrome" in nome.lower(): fallback_id = "Google.Chrome"
+            if "office" in nome.lower() or "microsoft 365" in nome.lower(): fallback_id = "Microsoft.Office"
+            
+            if fallback_id:
+                _log(f"  ⚠  Tentando fallback via winget para {nome}...", "warn")
+                _sw_progress(nome, "instalando", 50)
+                ok_wg = _run_cmd(f"winget install --id {fallback_id} --silent --accept-package-agreements --accept-source-agreements",
+                                 label=f"winget (fallback): {nome}", timeout=2400)
+                if ok_wg:
+                    _sw_progress(nome, "ok", 100)
+                    continue
+
             _sw_progress(nome, "erro", 0)
             etapa_ok = False
             continue
 
         _sw_progress(nome, "instalando", 92)
-        ok = _run_cmd(f'"{arquivo}" {args}', label=f"Instalando {nome}",
-                      timeout=600, ok_codes=ok_codes)
+
+        # Lógica especial para pacotes MSIX (Slack)
+        if str(arquivo).lower().endswith(".msix"):
+            cmd = f'powershell.exe -Command "Add-AppxPackage -Path \'{arquivo}\'"'
+            ok = _run_cmd(cmd, label=f"Instalando {nome} (MSIX)", timeout=600)
+        else:
+            # Instalação padrão (.exe / .msi)
+            cmd = f'"{arquivo}" {args}'
+            timeout_val = 2400 if "office" in nome.lower() or "microsoft 365" in nome.lower() else 900
+            ok = _run_cmd(cmd, label=f"Instalando {nome}", timeout=timeout_val, ok_codes=ok_codes)
+        
+        # Fallback específico para Chrome/Office se a instalação do arquivo falhar
+        if not ok:
+            fallback_id = None
+            if "chrome" in nome.lower(): fallback_id = "Google.Chrome"
+            if "microsoft 365" in nome.lower() or "office" in nome.lower(): fallback_id = "Microsoft.Office"
+
+            if fallback_id:
+                _log(f"  ⚠  Instalação manual de {nome} falhou. Tentando fallback via winget...", "warn")
+                _sw_progress(nome, "instalando", 50)
+                ok = _run_cmd(f"winget install --id {fallback_id} --silent --accept-package-agreements --accept-source-agreements",
+                              label=f"winget (fallback): {nome}", timeout=2400, ok_codes={0, 1, 3010})
+
         if ok:
             _sw_progress(nome, "ok", 100)
+            # Regra de Firewall para o AnyDesk (Garante conexão)
+            if "anydesk" in nome.lower():
+                _log("  ⚡  Liberando AnyDesk no Firewall...", "muted")
+                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=in action=allow program="{detect_path}" enable=yes', label="Firewall: AnyDesk Inbound")
+                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=out action=allow program="{detect_path}" enable=yes', label="Firewall: AnyDesk Outbound")
         else:
             _log(f"  ⚠  Instalação de {nome} pode ter falhado (verifique o log).", "warn")
             _sw_progress(nome, "erro", 0)
@@ -593,6 +644,16 @@ def _etapa_teste_rede() -> bool:
     _log(f"\n  🔍  TESTE DE BUSCA NA REDE: Verificando {caminho}...", "info")
     
     try:
+        # 0. Autenticação na rede (net use) para evitar pedido de credenciais
+        _log(f"  🔑  Autenticando em {caminho}...", "muted")
+        # Remove conexões existentes para evitar conflitos
+        subprocess.run(f'net use {caminho} /delete /y', shell=True, capture_output=True)
+        # Cria nova conexão com as credenciais fornecidas
+        auth_cmd = f'net use {caminho} /user:{_NET_USER} {_NET_PASS}'
+        if not _run_cmd(auth_cmd, label="Login na Rede"):
+            _log(f"  ✗  Falha na autenticação de rede. Verifique usuário/senha.", "warn")
+            # Prossegue mesmo assim, pode ser que já tenha acesso por outro meio
+
         # 1. Verificação programática de existência/acesso
         if not os.path.exists(caminho):
             _log(f"  ✗  Erro: O caminho {caminho} não foi localizado ou está inacessível.", "err")
@@ -649,16 +710,34 @@ def _etapa_otimizacao() -> bool:
     if _run_cmd("powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", label="Ativar Alto Desempenho"):
         acoes_ok += 1
     
-    # 2. Desativar Animações Visuais (Apenas animações de janela)
-    _run_cmd(r'reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f', label="Desativar Animações de Janela")
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 0 /f', label="Desativar Animações da Barra de Tarefas")
+    # 2. Configurações de Energia (NUNCA desligar/suspender)
+    _log("  > Configurando tempos de suspensão/vídeo para NUNCA...", "muted")
+    cmds_energia = [
+        "powercfg -x -monitor-timeout-ac 0",
+        "powercfg -x -monitor-timeout-dc 0",
+        "powercfg -x -standby-timeout-ac 0",
+        "powercfg -x -standby-timeout-dc 0",
+        "powercfg -x -hibernate-timeout-ac 0",
+        "powercfg -x -hibernate-timeout-dc 0",
+        "powercfg -h off" # Desativar Hibernação completamente
+    ]
+    for c in cmds_energia: _run_cmd(c, label=f"Energia: {c}")
     acoes_ok += 1
 
-    # 3. Apps em Segundo Plano
+    # 3. Ajustes Visuais (Performance com Estética)
+    _log("  > Ajustando efeitos visuais (mantendo sombras e seleção)...", "muted")
+    # Desativar animações de janela (as que mais pesam)
+    _run_cmd(r'reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f', label="Visuais: Sem Animações de Janela")
+    # Desativar transparência (melhora resposta da UI)
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Visuais: Sem Transparência")
+    # Nota: Removido VisualFXSetting=2 para preservar sombras e retângulo de seleção pedidos pelo usuário
+    acoes_ok += 1
+
+    # 4. Apps em Segundo Plano
     _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" /v GlobalUserDisabled /t REG_DWORD /d 1 /f', label="Desativar Apps em Segundo Plano")
     acoes_ok += 1
 
-    # 4. Storage Sense (Sensor de Armazenamento)
+    # 5. Storage Sense (Sensor de Armazenamento)
     _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
     acoes_ok += 1
 
@@ -692,11 +771,6 @@ def _etapa_otimizacao() -> bool:
     _run_cmd("net start wuauserv", label="Iniciando Windows Update")
     acoes_ok += 1
 
-    # 7. DISM StartComponentCleanup
-    _log("  > Executando DISM Component Cleanup (Limpando winxs)...", "muted")
-    _run_cmd("dism.exe /online /Cleanup-Image /StartComponentCleanup /NoRestart", label="DISM Cleanup")
-    acoes_ok += 1
-
     # 8. Esvaziar Lixeira
     _run_cmd('powershell.exe -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"', label="Esvaziar Lixeira")
     acoes_ok += 1
@@ -721,7 +795,7 @@ def _etapa_otimizacao() -> bool:
 #  ORQUESTRADOR
 # ══════════════════════════════════════════════
 
-def run_automation(instalar_softwares: bool = True, otimizacao: bool = True):
+def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_lista: list = None):
     inicio = datetime.now()
     erros: List[str] = []
 
@@ -732,7 +806,7 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True):
 
     # Etapa 1: Downloads (Opcional)
     if instalar_softwares:
-        if not _etapa_downloads():
+        if not _etapa_downloads(sw_lista):
             erros.append("downloads")
     else:
         _log("\n  [INFO] Pulando etapa de downloads conforme solicitado.", "info")
