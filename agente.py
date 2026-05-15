@@ -741,34 +741,27 @@ def _etapa_otimizacao() -> bool:
     _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
     acoes_ok += 1
 
-    # 5. Limpeza de Pastas Temporárias
-    _log("  > Limpando diretórios temporários...", "muted")
-    pastas_limpeza = [
-        os.environ.get("TEMP"),
-        os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Temp"),
-        os.path.join(os.environ.get("LocalAppData", ""), "Temp")
-    ]
+    # 5. Limpeza de Pastas Temporárias (Alta Performance via CMD)
+    _log("  > Limpando diretórios temporários (Alta Performance)...", "muted")
     
-    for pasta in pastas_limpeza:
-        if pasta and os.path.exists(pasta):
-            try:
-                # Tentativa de remover conteúdo (ignora arquivos em uso)
-                for item in os.listdir(pasta):
-                    item_path = os.path.join(pasta, item)
-                    try:
-                        if os.path.isfile(item_path) or os.path.islink(item_path):
-                            os.unlink(item_path)
-                        elif os.path.is_dir(item_path):
-                            shutil.rmtree(item_path)
-                    except: continue # Arquivo em uso
-            except Exception as e: erros_list.append(f"Limpeza {pasta}: {e}")
+    # Comandos nativos são ordens de magnitude mais rápidos que loops Python para milhares de arquivos
+    cmds_limpeza = [
+        'del /q /f /s "%TEMP%\*" >nul 2>&1',
+        'del /q /f /s "C:\Windows\Temp\*" >nul 2>&1',
+        'for /d %%x in ("%TEMP%\*") do rd /s /q "%%x" >nul 2>&1',
+        'for /d %%x in ("C:\Windows\Temp\*") do rd /s /q "%%x" >nul 2>&1'
+    ]
+    for c in cmds_limpeza:
+        subprocess.run(c, shell=True, capture_output=True, timeout=30)
+        
     acoes_ok += 1
 
     # 6. Windows Update Cache
     _log("  > Limpando Cache do Windows Update...", "muted")
-    _run_cmd("net stop wuauserv", label="Parando Windows Update (Temporário)")
-    _run_cmd(f'rd /s /q "{os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "SoftwareDistribution", "Download")}"', label="Limpando SoftwareDistribution")
-    _run_cmd("net start wuauserv", label="Iniciando Windows Update")
+    # Tenta parar o serviço com timeout curto para não travar
+    _run_cmd("net stop wuauserv /y", label="Parar Windows Update", timeout=15)
+    _run_cmd(r'rd /s /q "C:\Windows\SoftwareDistribution\Download"', label="Limpar Cache de Download", timeout=30)
+    _run_cmd("net start wuauserv", label="Reiniciar Windows Update", timeout=15)
     acoes_ok += 1
 
     # 8. Esvaziar Lixeira
