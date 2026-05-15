@@ -123,6 +123,13 @@ SOFTWARES: List[Tuple] = [
         {0, 1603, 3010},
         r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE"
     ),
+    (
+        "WinRAR",
+        "winrar-x64-722br.exe",
+        "/S",
+        {0},
+        r"C:\Program Files\WinRAR\WinRAR.exe"
+    ),
 ]
 
 # ─────────────────────────────────────────────
