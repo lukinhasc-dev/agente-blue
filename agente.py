@@ -775,6 +775,34 @@ def _etapa_otimizacao() -> bool:
     _run_cmd('powershell.exe -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"', label="Esvaziar Lixeira")
     acoes_ok += 1
 
+    # 9. Personalização Visual (Windows 11)
+    _log("  > Aplicando Personalização Visual (Modo Escuro, Barra de Tarefas)...", "muted")
+    
+    # Ocultar Pesquisa (0=Oculto, 1=Ícone, 2=Caixa)
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Search" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Ocultar Caixa de Pesquisa")
+    
+    # Desativar Visão de Tarefas
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Desativar Visão de Tarefas")
+    
+    # Modo Escuro (Sistema e Apps)
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f', label="Modo Escuro (Sistema)")
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f', label="Modo Escuro (Apps)")
+    
+    # Desativar Transparência
+    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Desativar Transparência")
+    
+    # Notificar Sistema
+    try:
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 5000, None)
+    except: pass
+    
+    # Reiniciar Explorer para aplicar barra de tarefas
+    _log("  > Reiniciando Windows Explorer para aplicar mudanças...", "muted")
+    _run_cmd("taskkill /f /im explorer.exe", label="Parar Explorer")
+    _run_cmd("start explorer.exe", label="Iniciar Explorer")
+    
+    acoes_ok += 1
+
     try:
         espaco_final = shutil.disk_usage("C:").free
         liberado_mb = max(0, (espaco_final - espaco_inicial) / (1024 * 1024))
