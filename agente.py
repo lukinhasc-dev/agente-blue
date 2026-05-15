@@ -746,10 +746,10 @@ def _etapa_otimizacao() -> bool:
     
     # Comandos nativos são ordens de magnitude mais rápidos que loops Python para milhares de arquivos
     cmds_limpeza = [
-        'del /q /f /s "%TEMP%\*" >nul 2>&1',
-        'del /q /f /s "C:\Windows\Temp\*" >nul 2>&1',
-        'for /d %%x in ("%TEMP%\*") do rd /s /q "%%x" >nul 2>&1',
-        'for /d %%x in ("C:\Windows\Temp\*") do rd /s /q "%%x" >nul 2>&1'
+        r'del /q /f /s "%TEMP%\*" >nul 2>&1',
+        r'del /q /f /s "C:\Windows\Temp\*" >nul 2>&1',
+        r'for /d %%x in ("%TEMP%\*") do rd /s /q "%%x" >nul 2>&1',
+        r'for /d %%x in ("C:\Windows\Temp\*") do rd /s /q "%%x" >nul 2>&1'
     ]
     for c in cmds_limpeza:
         subprocess.run(c, shell=True, capture_output=True, timeout=30)
