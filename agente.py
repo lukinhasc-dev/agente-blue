@@ -355,6 +355,118 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
 
 # (função _install_adobe_via_task removida — Adobe agora via download direto)
 
+# ══════════════════════════════════════════════
+#  CONTEXTO DO USUÁRIO LOGADO
+#  O agente roda elevado como Administrator; mas todas as configurações
+#  "por usuário" (wallpaper, modo escuro, barra de tarefas, %TEMP%) precisam
+#  cair no perfil do usuário logado — não no do Administrator.
+# ══════════════════════════════════════════════
+
+_LOGGED_USER_CACHE = None
+_LOGGED_USER_RESOLVED = False
+
+
+def _logged_user() -> Optional[dict]:
+    """Retorna {'user': 'PC\\Joao', 'sid': 'S-1-5-...', 'profile': 'C:\\Users\\Joao'}
+    do usuário logado no console, ou None se não for possível resolver
+    (ex.: rodando logado como o próprio Administrator durante testes)."""
+    global _LOGGED_USER_CACHE, _LOGGED_USER_RESOLVED
+    if _LOGGED_USER_RESOLVED:
+        return _LOGGED_USER_CACHE
+    _LOGGED_USER_RESOLVED = True
+
+    ps = (
+        "$u = (Get-CimInstance Win32_ComputerSystem).UserName; "
+        "if (-not $u) { exit 1 }; "
+        "$sid = (New-Object System.Security.Principal.NTAccount($u))."
+        "Translate([System.Security.Principal.SecurityIdentifier]).Value; "
+        "$p = (Get-ItemProperty "
+        "\"HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\$sid\")"
+        ".ProfileImagePath; "
+        "[pscustomobject]@{user=$u; sid=$sid; profile=$p} | ConvertTo-Json -Compress"
+    )
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        out = (r.stdout or "").strip()
+        if out:
+            data = json.loads(out)
+            if data.get("sid") and data.get("user"):
+                _LOGGED_USER_CACHE = data
+                _log(f"  👤  Usuário logado detectado: {data['user']}", "muted")
+    except Exception as exc:
+        _log(f"  ⚠  Não foi possível detectar o usuário logado: {exc}", "warn")
+
+    if _LOGGED_USER_CACHE is None:
+        _log("  ⚠  Usuário logado não resolvido — aplicando no contexto atual (Administrator).", "warn")
+    return _LOGGED_USER_CACHE
+
+
+def _user_reg_base() -> str:
+    """Base de registro por usuário: HKU\\<SID> do usuário logado, ou HKCU como fallback."""
+    info = _logged_user()
+    return f"HKU\\{info['sid']}" if info else "HKCU"
+
+
+def _run_as_logged_user(cmd_path: str, label: str = "") -> bool:
+    """Executa um .cmd no contexto do usuário logado via Agendador de Tarefas.
+    Usa /it (token interativo do usuário logado) — não exige senha."""
+    info = _logged_user()
+    if not info:
+        # Sem usuário resolvido: roda no contexto atual mesmo.
+        return _run_cmd(f'"{cmd_path}"', label=label or "Executar script (contexto atual)")
+
+    task = "AgenteBlue_UserApply"
+    subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True)
+    create = (
+        f'schtasks /create /tn {task} /tr "{cmd_path}" /sc once /st 23:59 '
+        f'/ru "{info["user"]}" /it /rl limited /f'
+    )
+    ok = _run_cmd(create, label=f"{label} (criar tarefa no usuário)")
+    if ok:
+        _run_cmd(f'schtasks /run /tn {task}', label=f"{label} (executar)")
+        time.sleep(4)
+        subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True)
+    return ok
+
+
+def _refresh_user_session(restart_explorer: bool = False, clear_recycle: bool = False) -> None:
+    """Aplica as alterações por usuário (tema/wallpaper/barra de tarefas) recarregando
+    os parâmetros do usuário e, opcionalmente, reiniciando o Explorer e esvaziando a
+    Lixeira — tudo no contexto do usuário LOGADO."""
+    info = _logged_user()
+
+    lines = ["@echo off", "rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True"]
+    if clear_recycle:
+        lines.append('powershell -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"')
+    if restart_explorer:
+        lines.append("taskkill /f /im explorer.exe >nul 2>&1")
+        lines.append("start explorer.exe")
+
+    if not info:
+        # Fallback (contexto atual): roda os comandos direto.
+        _run_cmd('rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True',
+                 label="Recarregar parâmetros do usuário")
+        if clear_recycle:
+            _run_cmd('powershell -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"',
+                     label="Esvaziar Lixeira")
+        if restart_explorer:
+            _run_cmd("taskkill /f /im explorer.exe", label="Parar Explorer")
+            _run_cmd("start explorer.exe", label="Iniciar Explorer")
+        return
+
+    script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    cmd_file = script_dir / "refresh_user.cmd"
+    try:
+        cmd_file.write_text("\r\n".join(lines) + "\r\n", encoding="ascii")
+        _run_as_logged_user(str(cmd_file), label="Aplicar configurações no usuário logado")
+    except Exception as exc:
+        _log(f"  ⚠  Falha ao aplicar no usuário logado: {exc}", "warn")
+
+
 def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
     dest = Path(tempfile.gettempdir()) / filename
     _log(f"  ⬇  Baixando  {filename}", "info")
@@ -523,10 +635,9 @@ def _etapa_wallpaper() -> bool:
         _etapa_fim("wallpaper", False, 38)
         return False
 
-    # ── Copiar para local PERMANENTE ─────────────────────────────────────────
-    # _MEIPASS é uma pasta temporária — o wallpaper precisa estar em disco
-    # fixo para o Windows manter após o exe fechar.
-    import shutil
+    # ── Copiar para local PERMANENTE e legível pelo usuário ──────────────────
+    # _MEIPASS é uma pasta temporária — o wallpaper precisa estar em disco fixo.
+    # ProgramData é legível por qualquer usuário (inclusive o logado não-admin).
     dest_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
@@ -538,38 +649,21 @@ def _etapa_wallpaper() -> bool:
         dest = src   # tenta mesmo assim
 
     wallpaper_path = str(dest)
-    _log(f"  🖼  Aplicando wallpaper: {wallpaper_path}", "info")
+    _log(f"  🖼  Aplicando wallpaper para o usuário logado: {wallpaper_path}", "info")
 
-    # ── Método 1: ctypes SystemParametersInfo (instantâneo) ──────────────────
-    try:
-        SPI_SETDESKWALLPAPER = 0x0014
-        SPIF_UPDATEINIFILE   = 0x01
-        SPIF_SENDCHANGE      = 0x02
-        result = ctypes.windll.user32.SystemParametersInfoW(
-            SPI_SETDESKWALLPAPER, 0,
-            wallpaper_path,
-            SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
-        )
-        if result:
-            _log("  ✔  Wallpaper aplicado com sucesso", "ok")
-            _etapa_fim("wallpaper", True, 38)
-            return True
-    except Exception as exc:
-        _log(f"  ⚠  ctypes falhou: {exc} — tentando PowerShell...", "warn")
+    # ── Escreve no hive do usuário LOGADO (não do Administrator) ──────────────
+    base = _user_reg_base()
+    reg_desk = f"{base}\\Control Panel\\Desktop"
+    ok = _run_cmd(f'reg add "{reg_desk}" /v WallPaper /t REG_SZ /d "{wallpaper_path}" /f',
+                  label="Wallpaper: caminho")
+    _run_cmd(f'reg add "{reg_desk}" /v WallpaperStyle /t REG_SZ /d 10 /f',
+             label="Wallpaper: estilo (Preencher)")
+    _run_cmd(f'reg add "{reg_desk}" /v TileWallpaper /t REG_SZ /d 0 /f',
+             label="Wallpaper: sem lado a lado")
 
-    # ── Método 2: PowerShell (fallback) ──────────────────────────────────────
-    safe_path = wallpaper_path.replace("'", "''")  # escape aspas simples
-    ps = (
-        "Add-Type -TypeDefinition "
-        "'using System; using System.Runtime.InteropServices; "
-        "public class WP { [DllImport(\"user32.dll\")] "
-        "public static extern bool SystemParametersInfo(int a, int b, string c, int d); }'; "
-        f"[WP]::SystemParametersInfo(0x0014, 0, '{safe_path}', 3)"
-    )
-    ok = _run_cmd(
-        f'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "{ps}"',
-        label="Wallpaper via PowerShell",
-    )
+    # Aplica imediatamente no contexto do usuário logado.
+    _refresh_user_session(restart_explorer=False)
+
     _etapa_fim("wallpaper", ok, 38)
     return ok
 
@@ -731,116 +825,100 @@ def _etapa_teste_rede() -> bool:
 def _etapa_otimizacao() -> bool:
     _etapa_inicio("otimizacao", 98)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
-    
+
     acoes_ok = 0
-    erros_list = []
-    
+
     try:
         espaco_inicial = shutil.disk_usage("C:").free
-    except:
+    except Exception:
         espaco_inicial = 0
 
-    # 1. Planos de Energia (Alto Desempenho)
+    # ── 1. Plano de Energia: Alto Desempenho (sistema, requer admin) ──────────
     if _run_cmd("powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", label="Ativar Alto Desempenho"):
         acoes_ok += 1
-    
-    # 2. Configurações de Energia (NUNCA desligar/suspender)
+
+    # ── 2. Energia: nunca desligar tela/suspender; desativar hibernação ───────
     _log("  > Configurando tempos de suspensão/vídeo para NUNCA...", "muted")
-    cmds_energia = [
+    for c in [
         "powercfg -x -monitor-timeout-ac 0",
         "powercfg -x -monitor-timeout-dc 0",
         "powercfg -x -standby-timeout-ac 0",
         "powercfg -x -standby-timeout-dc 0",
         "powercfg -x -hibernate-timeout-ac 0",
         "powercfg -x -hibernate-timeout-dc 0",
-        "powercfg -h off" # Desativar Hibernação completamente
-    ]
-    for c in cmds_energia: _run_cmd(c, label=f"Energia: {c}")
+        "powercfg -h off",
+    ]:
+        _run_cmd(c, label=f"Energia: {c}")
     acoes_ok += 1
 
-    # 3. Ajustes Visuais (Performance com Estética)
-    _log("  > Ajustando efeitos visuais (mantendo sombras e seleção)...", "muted")
-    # Desativar animações de janela (as que mais pesam)
-    _run_cmd(r'reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f', label="Visuais: Sem Animações de Janela")
-    # Desativar transparência (melhora resposta da UI)
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Visuais: Sem Transparência")
-    # Nota: Removido VisualFXSetting=2 para preservar sombras e retângulo de seleção pedidos pelo usuário
+    # ── 3. Configurações POR USUÁRIO (no hive do usuário LOGADO, não do admin) ─
+    base       = _user_reg_base()
+    themes     = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+    advanced   = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced"
+    search     = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\Search"
+    bgapps     = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications"
+    storage    = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\StorageSense\\Parameters\\StoragePolicy"
+    winmetrics = f"{base}\\Control Panel\\Desktop\\WindowMetrics"
+
+    _log("  > Aplicando ajustes visuais e de barra de tarefas no usuário logado...", "muted")
+    # Animações de janela desativadas (preserva sombras/seleção)
+    _run_cmd(f'reg add "{winmetrics}" /v MinAnimate /t REG_SZ /d 0 /f', label="Sem animações de janela")
+    # Transparência desativada
+    _run_cmd(f'reg add "{themes}" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Sem transparência")
+    # Modo escuro (sistema + apps)
+    _run_cmd(f'reg add "{themes}" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f', label="Modo escuro (sistema)")
+    _run_cmd(f'reg add "{themes}" /v AppsUseLightTheme /t REG_DWORD /d 0 /f', label="Modo escuro (apps)")
+    # Barra de tarefas: ocultar pesquisa e botão de Visão de Tarefas
+    _run_cmd(f'reg add "{search}" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Ocultar caixa de pesquisa")
+    _run_cmd(f'reg add "{advanced}" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Desativar Visão de Tarefas")
+    # Mostrar PERCENTUAL DA BATERIA na barra de tarefas (notebooks)
+    _run_cmd(f'reg add "{advanced}" /v IsBatteryPercentageEnabled /t REG_DWORD /d 1 /f', label="Mostrar % da bateria")
+    # Apps em segundo plano desativados
+    _run_cmd(f'reg add "{bgapps}" /v GlobalUserDisabled /t REG_DWORD /d 1 /f', label="Desativar apps em segundo plano")
+    # Sensor de Armazenamento (limpeza automática)
+    _run_cmd(f'reg add "{storage}" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
     acoes_ok += 1
 
-    # 4. Apps em Segundo Plano
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" /v GlobalUserDisabled /t REG_DWORD /d 1 /f', label="Desativar Apps em Segundo Plano")
-    acoes_ok += 1
-
-    # 5. Storage Sense (Sensor de Armazenamento)
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
-    acoes_ok += 1
-
-    # 5. Limpeza de Pastas Temporárias (Alta Performance via CMD)
-    _log("  > Limpando diretórios temporários (Alta Performance)...", "muted")
-    
-    # Comandos nativos são ordens de magnitude mais rápidos que loops Python para milhares de arquivos
+    # ── 4. Limpeza de temporários do USUÁRIO LOGADO + sistema ─────────────────
+    _log("  > Limpando pastas temporárias...", "muted")
+    info = _logged_user()
+    user_temp = (f"{info['profile']}\\AppData\\Local\\Temp" if info
+                 else os.environ.get("TEMP", r"C:\Windows\Temp"))
+    # cmd /c via shell=True usa loop FOR de linha de comando (%x, não %%x).
     cmds_limpeza = [
-        r'del /q /f /s "%TEMP%\*" >nul 2>&1',
+        f'del /q /f /s "{user_temp}\\*" >nul 2>&1',
+        f'for /d %x in ("{user_temp}\\*") do @rd /s /q "%x" >nul 2>&1',
         r'del /q /f /s "C:\Windows\Temp\*" >nul 2>&1',
-        r'for /d %%x in ("%TEMP%\*") do rd /s /q "%%x" >nul 2>&1',
-        r'for /d %%x in ("C:\Windows\Temp\*") do rd /s /q "%%x" >nul 2>&1'
+        r'for /d %x in ("C:\Windows\Temp\*") do @rd /s /q "%x" >nul 2>&1',
     ]
     for c in cmds_limpeza:
-        subprocess.run(c, shell=True, capture_output=True, timeout=30)
-        
+        try:
+            subprocess.run(c, shell=True, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            _log("  ⚠  Limpeza de temporários demorou demais (alguns arquivos em uso).", "warn")
     acoes_ok += 1
 
-    # 6. Windows Update Cache
-    _log("  > Limpando Cache do Windows Update...", "muted")
-    # Tenta parar o serviço com timeout curto para não travar
+    # ── 5. Cache do Windows Update ────────────────────────────────────────────
+    _log("  > Limpando cache do Windows Update...", "muted")
     _run_cmd("net stop wuauserv /y", label="Parar Windows Update", timeout=15)
-    _run_cmd(r'rd /s /q "C:\Windows\SoftwareDistribution\Download"', label="Limpar Cache de Download", timeout=30)
+    _run_cmd(r'rd /s /q "C:\Windows\SoftwareDistribution\Download"', label="Limpar cache de download", timeout=30)
     _run_cmd("net start wuauserv", label="Reiniciar Windows Update", timeout=15)
     acoes_ok += 1
 
-    # 8. Esvaziar Lixeira
-    _run_cmd('powershell.exe -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"', label="Esvaziar Lixeira")
-    acoes_ok += 1
-
-    # 9. Personalização Visual (Windows 11)
-    _log("  > Aplicando Personalização Visual (Modo Escuro, Barra de Tarefas)...", "muted")
-    
-    # Ocultar Pesquisa (0=Oculto, 1=Ícone, 2=Caixa)
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Search" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Ocultar Caixa de Pesquisa")
-    
-    # Desativar Visão de Tarefas
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Desativar Visão de Tarefas")
-    
-    # Modo Escuro (Sistema e Apps)
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f', label="Modo Escuro (Sistema)")
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f', label="Modo Escuro (Apps)")
-    
-    # Desativar Transparência
-    _run_cmd(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Desativar Transparência")
-    
-    # Notificar Sistema
-    try:
-        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 5000, None)
-    except: pass
-    
-    # Reiniciar Explorer para aplicar barra de tarefas
-    _log("  > Reiniciando Windows Explorer para aplicar mudanças...", "muted")
-    _run_cmd("taskkill /f /im explorer.exe", label="Parar Explorer")
-    _run_cmd("start explorer.exe", label="Iniciar Explorer")
-    
+    # ── 6. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
+    _log("  > Aplicando alterações e reiniciando o Explorer no usuário logado...", "muted")
+    _refresh_user_session(restart_explorer=True, clear_recycle=True)
     acoes_ok += 1
 
     try:
         espaco_final = shutil.disk_usage("C:").free
         liberado_mb = max(0, (espaco_final - espaco_inicial) / (1024 * 1024))
-    except:
+    except Exception:
         liberado_mb = 0
 
     _log("\n  ✅  RELATÓRIO DE OTIMIZAÇÃO", "ok")
-    _log(f"      Ações executadas com sucesso: {acoes_ok}", "muted")
+    _log(f"      Ações executadas: {acoes_ok}", "muted")
     _log(f"      Espaço liberado estimado: {liberado_mb:.2f} MB", "muted")
-    if erros_list:
-        _log(f"      Alertas/Erros (ignorado arquivos em uso): {len(erros_list)}", "warn")
 
     _etapa_fim("otimizacao", True, 100)
     return True
