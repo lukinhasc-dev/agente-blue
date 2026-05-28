@@ -47,10 +47,15 @@ _NET_PASS: str = "teste123"
 # ─────────────────────────────────────────────
 #  CAMINHOS
 # ─────────────────────────────────────────────
-if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    _BASE_DIR = Path(sys._MEIPASS)
+if getattr(sys, "frozen", False):
+    # Build onedir: o .exe e os assets (html/js/css, apps/, wallpaper) ficam na
+    # MESMA pasta — editáveis sem recompilar. _BUNDLE_DIR é o fallback embutido
+    # (pasta _internal), usado quando um asset externo não está presente.
+    _BASE_DIR = Path(sys.executable).resolve().parent
+    _BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", _BASE_DIR))
 else:
     _BASE_DIR = Path(__file__).resolve().parent
+    _BUNDLE_DIR = _BASE_DIR
 
 _LOG_FILE = Path(os.environ.get("TEMP", "C:\\Temp")) / "agente_blue.log"
 
@@ -156,6 +161,21 @@ class AgenteHandler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+    def translate_path(self, path):
+        # Serve a partir da pasta externa (editável). Se o arquivo não existir
+        # ali, cai para a cópia embutida em _internal (_BUNDLE_DIR).
+        ext = super().translate_path(path)
+        if os.path.exists(ext):
+            return ext
+        try:
+            rel = os.path.relpath(ext, str(_BASE_DIR))
+            cand = os.path.join(str(_BUNDLE_DIR), rel)
+            if os.path.exists(cand):
+                return cand
+        except ValueError:
+            pass
+        return ext
 
     def do_GET(self):
         if self.path == "/api/stream":
@@ -271,17 +291,24 @@ def is_admin() -> bool:
 
 
 def elevate_and_restart() -> None:
-    script = str(Path(__file__).resolve())
-    python = sys.executable
-
     def esc(s: str) -> str:
         return s.replace("'", "''")
+
+    if getattr(sys, "frozen", False):
+        # Compilado: relança o próprio .exe (sem argumento de script).
+        target = sys.executable
+        arglist = ""
+    else:
+        # Dev: relança "python agente.py".
+        target = sys.executable
+        script = str(Path(__file__).resolve())
+        arglist = f"-ArgumentList '\"{esc(script)}\"' "
 
     ps_cmd = (
         f"$pass = ConvertTo-SecureString '{esc(_ADMIN_PASS)}' -AsPlainText -Force; "
         f"$cred = New-Object System.Management.Automation.PSCredential('{esc(_ADMIN_USER)}', $pass); "
-        f"Start-Process '{esc(python)}' "
-        f"-ArgumentList '\"{esc(script)}\"' "
+        f"Start-Process '{esc(target)}' "
+        f"{arglist}"
         f"-Credential $cred -Wait -WindowStyle Normal"
     )
     log.info("Elevando privilégios para Administrador...")
