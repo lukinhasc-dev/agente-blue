@@ -33,7 +33,7 @@ import urllib.request
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 # ─────────────────────────────────────────────
 #  CREDENCIAIS DE ADMINISTRADOR
@@ -80,61 +80,76 @@ logging.basicConfig(
 log = logging.getLogger("agente-blue")
 
 # ─────────────────────────────────────────────
-# (nome, url, filename, silent_args, ok_codes)
-# Se url == "" → instala via winget (args = comando winget completo)
-# ok_codes: set de códigos de saída considerados sucesso (padrão {0})
+#  CATÁLOGO DE SOFTWARES
+#  Sem instaladores embutidos. Cada app é instalado por um de dois métodos:
+#    metodo="url"    → baixa o instalador oficial e roda silencioso
+#                      (exe normal, ou msiexec quando "msi": True)
+#    metodo="winget" → instala via Windows Package Manager (winget_id)
+#  Campos:
+#    nome     : rótulo (precisa bater com data-sw do index.html)
+#    detect   : caminho que, se existir, indica que já está instalado (pula)
+#    ok_codes : códigos de saída tratados como sucesso (padrão {0})
 # ─────────────────────────────────────────────
-# (Nome, Arquivo em 'apps/', Argumentos, Códigos de OK, Caminho de Detecção)
-SOFTWARES: List[Tuple] = [
-    (
-        "AnyDesk",
-        "AnyDesk.exe",
-        '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
-        {0, 11},
-        r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
-    ),
-    (
-        "Google Chrome",
-        "ChromeSetup.exe",
-        "/silent /install",
-        {0, 1603, 3010},
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-    ),
-    (
-        "Google Drive",
-        "GoogleDriveSetup.exe",
-        "--silent --desktop_shortcut --skip_launch_new --gsuite_shortcuts=false",
-        {0, 1638, 3010},
-        r"C:\Program Files\Google\Drive File Stream"
-    ),
-    (
-        "Adobe Acrobat Reader",
-        "Reader_br_install.exe",
-        "/sAll /rs /msi EULA_ACCEPT=YES",
-        {0, 3010, 1641},
-        r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe"
-    ),
-    (
-        "Slack",
-        "Slack.msix",
-        "", # Instalado via Add-AppxPackage
-        {0},
-        None # MSIX é difícil de detectar por caminho fixo, winget/powershell lidam com isso
-    ),
-    (
-        "Microsoft 365",
-        "OfficeSetup.exe",
-        "",
-        {0, 1603, 3010},
-        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE"
-    ),
-    (
-        "WinRAR",
-        "winrar-x64-722br.exe",
-        "/S",
-        {0},
-        r"C:\Program Files\WinRAR\WinRAR.exe"
-    ),
+SOFTWARES: List[dict] = [
+    {
+        "nome": "AnyDesk",
+        "metodo": "url",
+        "url": "https://download.anydesk.com/AnyDesk.exe",
+        "filename": "AnyDesk.exe",
+        "args": '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
+        "ok_codes": {0, 11},
+        "detect": r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
+        "firewall": True,
+    },
+    {
+        "nome": "Google Chrome",
+        "metodo": "url",
+        "url": "https://dl.google.com/chrome/install/standalonesetup64.exe",
+        "filename": "ChromeStandaloneSetup64.exe",
+        "args": "/silent /install",
+        "ok_codes": {0, 1603, 3010},
+        "detect": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    },
+    {
+        "nome": "Google Drive",
+        "metodo": "url",
+        "url": "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe",
+        "filename": "GoogleDriveSetup.exe",
+        "args": "--silent --desktop_shortcut --gsuite_shortcuts=false",
+        "ok_codes": {0, 1638, 3010},
+        "detect": r"C:\Program Files\Google\Drive File Stream",
+    },
+    {
+        "nome": "Slack",
+        "metodo": "url",
+        "url": "https://slack.com/ssb/download-win64",
+        "filename": "SlackSetup.exe",
+        "args": "",                # instalador Squirrel: instala silencioso por padrão
+        "ok_codes": {0},
+        "detect": None,
+        "user_context": True,      # Slack é por-usuário → instalar no usuário logado
+    },
+    {
+        "nome": "Adobe Acrobat Reader",
+        "metodo": "winget",
+        "winget_id": "Adobe.Acrobat.Reader.64-bit",
+        "ok_codes": {0},
+        "detect": r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
+    },
+    {
+        "nome": "Microsoft 365",
+        "metodo": "winget",
+        "winget_id": "Microsoft.Office",
+        "ok_codes": {0},
+        "detect": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+    },
+    {
+        "nome": "WinRAR",
+        "metodo": "winget",
+        "winget_id": "RARLab.WinRAR",
+        "ok_codes": {0},
+        "detect": r"C:\Program Files\WinRAR\WinRAR.exe",
+    },
 ]
 
 # ─────────────────────────────────────────────
@@ -317,21 +332,34 @@ def elevate_and_restart() -> None:
 
 
 def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
-             ok_codes: Optional[set] = None) -> bool:
+             ok_codes: Optional[set] = None, detach: bool = False) -> bool:
     """Executa comando e retorna True se returncode estiver em ok_codes.
     ok_codes padrão = {0}.  Passe sets adicionais para aceitar 'já instalado' etc.
+
+    detach=True: NÃO captura stdout/stderr (usa DEVNULL). Necessário quando o
+    comando lança um processo PERSISTENTE (explorer.exe, instaladores que abrem
+    o app no fim como Google Drive/AnyDesk) — com pipes capturados, o filho herda
+    o pipe e o mantém aberto, travando o Python até o timeout.
     """
     if ok_codes is None:
         ok_codes = {0}
     desc = label or cmd[:80]
     _log(f"  ▶  {desc}", "info")
     try:
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True,
-            stdin=subprocess.DEVNULL,          # evita travamento: sem stdin = sem espera por input
-            text=True, encoding="utf-8", errors="replace", timeout=timeout,
-        )
-        for line in (result.stdout or "").strip().splitlines():
+        if detach:
+            result = subprocess.run(
+                cmd, shell=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+            )
+            stdout_txt, stderr_txt = "", ""
+        else:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True,
+                stdin=subprocess.DEVNULL,      # evita travamento: sem stdin = sem espera por input
+                text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            )
+            stdout_txt, stderr_txt = result.stdout or "", result.stderr or ""
+        for line in stdout_txt.strip().splitlines():
             if line.strip():
                 _log(f"     {line}", "muted")
         if result.returncode in ok_codes:
@@ -341,7 +369,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
                 _log(f"  ✔  Código {result.returncode} → considerado sucesso (ex: já instalado)", "ok")
             return True
         # Código de erro real
-        for line in (result.stderr or "").strip().splitlines():
+        for line in stderr_txt.strip().splitlines():
             if line.strip():
                 _log(f"     {line}", "warn")
         _log(f"  ✗  Código de saída: {result.returncode}", "warn")
@@ -354,6 +382,52 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
         return False
 
 # (função _install_adobe_via_task removida — Adobe agora via download direto)
+
+# ══════════════════════════════════════════════
+#  WINGET (Windows Package Manager)
+# ══════════════════════════════════════════════
+
+_WINGET_OK: Optional[bool] = None
+
+
+def _winget_disponivel() -> bool:
+    try:
+        r = subprocess.run("winget --version", shell=True, capture_output=True,
+                           text=True, timeout=30)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _ensure_winget() -> bool:
+    """Garante o winget. No Windows Sandbox (e Server) ele não vem instalado;
+    tenta provisioná-lo via módulo Microsoft.WinGet.Client (resolve dependências
+    sozinho). Resultado é cacheado. Falha não é fatal."""
+    global _WINGET_OK
+    if _WINGET_OK is not None:
+        return _WINGET_OK
+
+    if _winget_disponivel():
+        _WINGET_OK = True
+        return True
+
+    _log("  ⚠  winget não encontrado — provisionando (necessário no Windows Sandbox)...", "warn")
+    ps = (
+        "[System.Net.ServicePointManager]::SecurityProtocol = "
+        "[System.Net.SecurityProtocolType]::Tls12; "
+        "Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null; "
+        "Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery; "
+        "Repair-WinGetPackageManager -Latest -Force"
+    )
+    _run_cmd(
+        f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps}"',
+        label="Instalar winget (App Installer)", timeout=900,
+    )
+    _WINGET_OK = _winget_disponivel()
+    if not _WINGET_OK:
+        _log("  ✗  Não foi possível provisionar o winget automaticamente.", "err")
+    return _WINGET_OK
+
 
 # ══════════════════════════════════════════════
 #  CONTEXTO DO USUÁRIO LOGADO
@@ -454,7 +528,8 @@ def _refresh_user_session(restart_explorer: bool = False, clear_recycle: bool = 
                      label="Esvaziar Lixeira")
         if restart_explorer:
             _run_cmd("taskkill /f /im explorer.exe", label="Parar Explorer")
-            _run_cmd("start explorer.exe", label="Iniciar Explorer")
+            # detach: explorer é persistente; sem isso o pipe capturado trava o Python.
+            _run_cmd("start explorer.exe", label="Iniciar Explorer", detach=True)
         return
 
     script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
@@ -467,8 +542,11 @@ def _refresh_user_session(restart_explorer: bool = False, clear_recycle: bool = 
         _log(f"  ⚠  Falha ao aplicar no usuário logado: {exc}", "warn")
 
 
-def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
-    dest = Path(tempfile.gettempdir()) / filename
+def _download_file(url: str, filename: str, nome_sw: str,
+                   dest_dir: Optional[Path] = None) -> Optional[Path]:
+    base = dest_dir or Path(tempfile.gettempdir())
+    base.mkdir(parents=True, exist_ok=True)
+    dest = base / filename
     _log(f"  ⬇  Baixando  {filename}", "info")
     _sw_progress(nome_sw, "baixando", 0)
     try:
@@ -514,6 +592,72 @@ def _download_file(url: str, filename: str, nome_sw: str) -> Optional[Path]:
 #  ETAPAS
 # ══════════════════════════════════════════════
 
+def _instalar_via_url(app: dict) -> bool:
+    """Baixa o instalador oficial e roda silencioso (exe ou msiexec).
+    Override offline opcional: se o arquivo existir em apps/, usa-o.
+    user_context=True → instala no perfil do usuário logado (apps por-usuário)."""
+    nome = app["nome"]
+    filename = app["filename"]
+    user_ctx = bool(app.get("user_context"))
+
+    # Apps por-usuário precisam ficar em local legível pelo usuário (ProgramData).
+    dest_dir = (Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+                if user_ctx else None)
+
+    arquivo: Optional[Path] = None
+    for cand in (_BASE_DIR / "apps" / filename, Path(sys.executable).parent / "apps" / filename):
+        if cand.exists():
+            arquivo = cand
+            _log(f"  📦  Usando instalador local (offline): {cand}", "ok")
+            break
+
+    if arquivo is None:
+        arquivo = _download_file(app["url"], filename, nome, dest_dir=dest_dir)
+        if arquivo is None:
+            return False
+
+    _sw_progress(nome, "instalando", 92)
+    ok_codes = app.get("ok_codes", {0})
+    args = app.get("args", "")
+
+    if app.get("msi"):
+        cmd = f'msiexec /i "{arquivo}" {args}'
+    else:
+        cmd = f'"{arquivo}" {args}'.rstrip()
+
+    # App por-usuário: roda no contexto do usuário logado via tarefa agendada.
+    if user_ctx and _logged_user():
+        script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        cmd_file = script_dir / "install_user_app.cmd"
+        try:
+            cmd_file.write_text("@echo off\r\n" + cmd + "\r\n", encoding="ascii")
+        except Exception as exc:
+            _log(f"  ⚠  Falha ao preparar instalação no usuário: {exc}", "warn")
+            return False
+        return _run_as_logged_user(str(cmd_file), label=f"Instalando {nome} (usuário logado)")
+
+    # detach=True: instaladores podem abrir o app no fim (processo persistente)
+    # e travariam o pipe capturado.
+    return _run_cmd(cmd, label=f"Instalando {nome}", timeout=1800,
+                    ok_codes=ok_codes, detach=True)
+
+
+def _instalar_via_winget(app: dict) -> bool:
+    """Instala via Windows Package Manager (winget), provisionando-o se faltar."""
+    nome = app["nome"]
+    _sw_progress(nome, "instalando", 50)
+    if not _ensure_winget():
+        _log(f"  ✗  winget indisponível — não foi possível instalar {nome}.", "err")
+        return False
+    cmd = (
+        f"winget install --id {app['winget_id']} --exact --silent "
+        "--accept-package-agreements --accept-source-agreements "
+        "--disable-interactivity"
+    )
+    return _run_cmd(cmd, label=f"winget: {nome}", timeout=2400, ok_codes=app.get("ok_codes", {0}))
+
+
 def _etapa_downloads(sw_lista: list = None) -> bool:
     _etapa_inicio("downloads", 5)
     etapa_ok = True
@@ -523,88 +667,36 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
         _etapa_fim("downloads", True, 30)
         return True
 
-    for item in SOFTWARES:
-        nome, filename, args = item[0], item[1], item[2]
-        
+    for app in SOFTWARES:
+        nome = app["nome"]
+
         # Filtro de seleção individual
         if sw_lista is not None and nome not in sw_lista:
             _log(f"  ⏭  {nome} não selecionado. Pulando...", "muted")
             continue
 
-        ok_codes: set = item[3] if len(item) > 3 else {0}
-        detect_path: str = item[4] if len(item) > 4 else None
-
         _log(f"\n  → {nome}", "info")
 
-        # --- VERIFICAÇÃO DE INSTALAÇÃO PRÉVIA ---
-        if detect_path and Path(detect_path).exists():
+        # Já instalado? pula.
+        detect = app.get("detect")
+        if detect and Path(detect).exists():
             _log(f"  ✔  {nome} já está instalado no sistema. Pulando...", "ok")
             _sw_progress(nome, "ok", 100)
             continue
 
-        # ── Localização do Instalador (Pasta apps/) ──
-        local_path = _BASE_DIR / "apps" / filename
-        extern_path = Path(sys.executable).parent / "apps" / filename
-        
-        arquivo = None
-        if local_path.exists():
-            arquivo = local_path
-            _log(f"  📦  Instalador encontrado: {filename}", "ok")
-        elif extern_path.exists():
-            arquivo = extern_path
-            _log(f"  📦  Instalador encontrado (externo): {filename}", "ok")
-        
-        if arquivo is None:
-            _log(f"  ✗  Erro: Arquivo {filename} não encontrado na pasta 'apps'.", "err")
-            # Fallback winget para Chrome/Office mesmo se o arquivo local sumir
-            fallback_id = None
-            if "chrome" in nome.lower(): fallback_id = "Google.Chrome"
-            if "office" in nome.lower() or "microsoft 365" in nome.lower(): fallback_id = "Microsoft.Office"
-            
-            if fallback_id:
-                _log(f"  ⚠  Tentando fallback via winget para {nome}...", "warn")
-                _sw_progress(nome, "instalando", 50)
-                ok_wg = _run_cmd(f"winget install --id {fallback_id} --silent --accept-package-agreements --accept-source-agreements",
-                                 label=f"winget (fallback): {nome}", timeout=2400)
-                if ok_wg:
-                    _sw_progress(nome, "ok", 100)
-                    continue
-
-            _sw_progress(nome, "erro", 0)
-            etapa_ok = False
-            continue
-
-        _sw_progress(nome, "instalando", 92)
-
-        # Lógica especial para pacotes MSIX (Slack)
-        if str(arquivo).lower().endswith(".msix"):
-            cmd = f'powershell.exe -Command "Add-AppxPackage -Path \'{arquivo}\'"'
-            ok = _run_cmd(cmd, label=f"Instalando {nome} (MSIX)", timeout=600)
+        # Instala pelo método declarado.
+        if app.get("metodo") == "winget":
+            ok = _instalar_via_winget(app)
         else:
-            # Instalação padrão (.exe / .msi)
-            cmd = f'"{arquivo}" {args}'
-            timeout_val = 2400 if "office" in nome.lower() or "microsoft 365" in nome.lower() else 900
-            ok = _run_cmd(cmd, label=f"Instalando {nome}", timeout=timeout_val, ok_codes=ok_codes)
-        
-        # Fallback específico para Chrome/Office se a instalação do arquivo falhar
-        if not ok:
-            fallback_id = None
-            if "chrome" in nome.lower(): fallback_id = "Google.Chrome"
-            if "microsoft 365" in nome.lower() or "office" in nome.lower(): fallback_id = "Microsoft.Office"
-
-            if fallback_id:
-                _log(f"  ⚠  Instalação manual de {nome} falhou. Tentando fallback via winget...", "warn")
-                _sw_progress(nome, "instalando", 50)
-                ok = _run_cmd(f"winget install --id {fallback_id} --silent --accept-package-agreements --accept-source-agreements",
-                              label=f"winget (fallback): {nome}", timeout=2400, ok_codes={0, 1, 3010})
+            ok = _instalar_via_url(app)
 
         if ok:
             _sw_progress(nome, "ok", 100)
-            # Regra de Firewall para o AnyDesk (Garante conexão)
-            if "anydesk" in nome.lower():
+            # Regra de Firewall para o AnyDesk (garante conexão).
+            if app.get("firewall") and detect:
                 _log("  ⚡  Liberando AnyDesk no Firewall...", "muted")
-                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=in action=allow program="{detect_path}" enable=yes', label="Firewall: AnyDesk Inbound")
-                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=out action=allow program="{detect_path}" enable=yes', label="Firewall: AnyDesk Outbound")
+                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=in action=allow program="{detect}" enable=yes', label="Firewall: AnyDesk Inbound")
+                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=out action=allow program="{detect}" enable=yes', label="Firewall: AnyDesk Outbound")
         else:
             _log(f"  ⚠  Instalação de {nome} pode ter falhado (verifique o log).", "warn")
             _sw_progress(nome, "erro", 0)
