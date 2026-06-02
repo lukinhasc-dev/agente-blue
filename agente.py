@@ -41,9 +41,6 @@ from typing import Optional, List
 _ADMIN_USER: str = r".\Administrator"
 _ADMIN_PASS: str = "Sham23*"
 
-_NET_USER: str = "scanner"
-_NET_PASS: str = "teste123"
-
 # ─────────────────────────────────────────────
 #  CAMINHOS
 # ─────────────────────────────────────────────
@@ -854,68 +851,13 @@ def _etapa_smb() -> bool:
                     label="Registro: RequireSecuritySignature = 0"):
         etapa_ok = False
 
-    _etapa_fim("smb", etapa_ok, 100)
+    _etapa_fim("smb", etapa_ok, 88)
     return etapa_ok
 
 
-def _etapa_teste_rede() -> bool:
-    _etapa_inicio("teste_rede", 95)
-    caminho = r"\\NBK-SRV-TI01"
-    _log(f"\n  🔍  TESTE DE BUSCA NA REDE: Verificando {caminho}...", "info")
-    
-    try:
-        # 0. Autenticação na rede (net use) para evitar pedido de credenciais
-        _log(f"  🔑  Autenticando em {caminho}...", "muted")
-        # Remove conexões existentes para evitar conflitos
-        subprocess.run(f'net use {caminho} /delete /y', shell=True, capture_output=True)
-        # Cria nova conexão com as credenciais fornecidas
-        auth_cmd = f'net use {caminho} /user:{_NET_USER} {_NET_PASS}'
-        if not _run_cmd(auth_cmd, label="Login na Rede"):
-            _log(f"  ✗  Falha na autenticação de rede. Verifique usuário/senha.", "warn")
-            # Prossegue mesmo assim, pode ser que já tenha acesso por outro meio
-
-        # 1. Verificação programática de existência/acesso
-        if not os.path.exists(caminho):
-            _log(f"  ✗  Erro: O caminho {caminho} não foi localizado ou está inacessível.", "err")
-            _log("     Verifique se o servidor está ligado e se o nome está correto.", "muted")
-            _etapa_fim("teste_rede", False, 100)
-            return False
-
-        # 2. Abrir para confirmação visual
-        _log(f"  ✔  Acesso confirmado. Abrindo pasta por 5 segundos...", "ok")
-        os.startfile(caminho)
-        
-        # Espera um pouco para o usuário ver
-        time.sleep(5)
-        
-        # 3. Fechar a janela automaticamente via PowerShell (COM Shell.Application)
-        # Esse comando procura janelas do explorer que apontam para o servidor e as fecha.
-        ps_close = (
-            "$shell = New-Object -ComObject Shell.Application; "
-            "$shell.Windows() | Where-Object { $_.LocationURL -like '*NBK-SRV-TI01*' -or $_.LocationName -like '*NBK-SRV-TI01*' } "
-            "| ForEach-Object { $_.Quit() }"
-        )
-        subprocess.run(["powershell", "-Command", ps_close], capture_output=True)
-        
-        _log(f"  🔒  Pasta fechada automaticamente para segurança.", "muted")
-        _etapa_fim("teste_rede", True, 100)
-        return True
-
-    except Exception as e:
-        error_msg = str(e)
-        if "5" in error_msg: # Access Denied no Windows
-            _log(f"  ✗  ERRO DE ACESSO: Permissão negada para {caminho}.", "err")
-        elif "3" in error_msg or "2" in error_msg:
-            _log(f"  ✗  ERRO DE CAMINHO: Servidor {caminho} não encontrado na rede.", "err")
-        else:
-            _log(f"  ✗  Erro inesperado: {error_msg}", "err")
-            
-        _etapa_fim("teste_rede", False, 100)
-        return False
-
 
 def _etapa_otimizacao() -> bool:
-    _etapa_inicio("otimizacao", 98)
+    _etapa_inicio("otimizacao", 92)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
 
     acoes_ok = 0
@@ -1044,16 +986,13 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
         erros.append("rede")
     if not _etapa_smb():
         erros.append("smb")
-    
-    # Novo Teste de Rede
-    _etapa_teste_rede()
 
     # Etapa Final: Otimização (Opcional)
     if otimizacao:
         _etapa_otimizacao()
     else:
         _log("\n  [INFO] Pulando etapa de otimização.", "info")
-        _etapa_inicio("otimizacao", 90)
+        _etapa_inicio("otimizacao", 92)
         _etapa_fim("otimizacao", True, 100)
 
     duracao = int((datetime.now() - inicio).total_seconds())

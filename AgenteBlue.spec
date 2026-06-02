@@ -15,10 +15,10 @@ ONEFILE = os.environ.get('AGENTEBLUE_ONEFILE') == '1'
 
 # Assets embutidos (no onedir servem de fallback; no onefile sao a unica copia).
 datas = [(f, '.') for f in ('index.html', 'script.js', 'style.css') if os.path.exists(f)]
-if os.path.exists('bluepay.ico'):
-    datas.append(('bluepay.ico', '.'))
+if os.path.exists('img/Icone-Blue.ico'):
+    datas.append(('img/Icone-Blue.ico', 'img'))
 
-icon_file = 'bluepay.ico' if os.path.exists('bluepay.ico') else None
+icon_file = 'img/Icone-Blue.ico' if os.path.exists('img/Icone-Blue.ico') else None
 
 a = Analysis(
     ['agente.py'],

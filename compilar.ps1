@@ -20,7 +20,7 @@ $DistDir    = Join-Path $PSScriptRoot 'dist'
 $OutDir     = Join-Path $DistDir $AppName            # saida onedir (pasta)
 $ExePath    = Join-Path $OutDir "$AppName.exe"
 $OnefileExe = Join-Path $DistDir "$AppName.exe"      # saida onefile (arquivo unico)
-$Assets     = @('index.html', 'script.js', 'style.css', 'bluepay.ico')
+$Assets     = @('index.html', 'script.js', 'style.css')
 
 if ($AssetsOnly -and $Onefile) {
     Write-Host " [ERRO] -AssetsOnly nao se aplica ao onefile (assets ficam embutidos no exe)." -ForegroundColor Red
@@ -51,6 +51,11 @@ function Copy-Assets {
     }
     foreach ($f in $Assets) {
         if (Test-Path $f) { Copy-Item $f -Destination $OutDir -Force }
+    }
+    # Copia pasta img/ (icone da empresa e outros assets graficos)
+    $imgSrc = Join-Path $PSScriptRoot 'img'
+    if (Test-Path $imgSrc) {
+        Copy-Item $imgSrc -Destination $OutDir -Recurse -Force
     }
     Get-ChildItem -Path $PSScriptRoot -Filter 'Fundo de Tela.*' -File -ErrorAction SilentlyContinue |
         ForEach-Object { Copy-Item $_.FullName -Destination $OutDir -Force }
