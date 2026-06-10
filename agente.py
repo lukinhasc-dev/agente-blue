@@ -119,9 +119,9 @@ SOFTWARES: List[dict] = [
     {
         "nome": "Slack",
         "metodo": "winget",
-        "winget_id": "Slack.Slack",
+        "winget_id": "SlackTechnologies.Slack",
         "ok_codes": {0},
-        "detect": r"C:\Program Files\Slack\slack.exe",
+        "detect": None,
     },
     {
         "nome": "Adobe Acrobat Reader",
@@ -277,6 +277,11 @@ def _etapa_inicio(etapa: str, pct: int):
 
 def _etapa_fim(etapa: str, sucesso: bool, pct: int):
     _broadcast({"type": "etapa_fim", "etapa": etapa, "sucesso": sucesso, "pct": pct})
+
+
+def _etapa_pulada(etapa: str, pct: int):
+    """Marca uma etapa como IGNORADA (não selecionada nas opções) e avança o progresso."""
+    _broadcast({"type": "etapa_pulada", "etapa": etapa, "pct": pct})
 
 
 def _sw_progress(nome: str, estado: str, pct: int = 0):
@@ -897,6 +902,21 @@ def _etapa_smb() -> bool:
 
 
 
+def _limpar_dir(caminho: str, timeout: int = 120) -> None:
+    """Esvazia o CONTEÚDO de uma pasta (mantém a pasta em si). Best-effort:
+    arquivos em uso são ignorados sem travar a execução."""
+    if not caminho:
+        return
+    for c in (
+        f'del /q /f /s "{caminho}\\*"',
+        f'for /d %x in ("{caminho}\\*") do @rd /s /q "%x"',
+    ):
+        try:
+            subprocess.run(c, shell=True, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _log(f"  ⚠  Limpeza demorou demais em {caminho} (arquivos em uso).", "warn")
+
+
 def _etapa_otimizacao() -> bool:
     _etapa_inicio("otimizacao", 92)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
@@ -954,23 +974,42 @@ def _etapa_otimizacao() -> bool:
     _run_cmd(f'reg add "{storage}" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
     acoes_ok += 1
 
-    # ── 4. Limpeza de temporários do USUÁRIO LOGADO + sistema ─────────────────
-    _log("  > Limpando pastas temporárias...", "muted")
+    # ── 4. Limpeza de temporários e caches (USUÁRIO LOGADO + sistema) ──────────
+    _log("  > Limpando temporários e caches (usuário + sistema)...", "muted")
     info = _logged_user()
-    user_temp = (f"{info['profile']}\\AppData\\Local\\Temp" if info
-                 else os.environ.get("TEMP", r"C:\Windows\Temp"))
-    # cmd /c via shell=True usa loop FOR de linha de comando (%x, não %%x).
-    cmds_limpeza = [
-        f'del /q /f /s "{user_temp}\\*" >nul 2>&1',
-        f'for /d %x in ("{user_temp}\\*") do @rd /s /q "%x" >nul 2>&1',
-        r'del /q /f /s "C:\Windows\Temp\*" >nul 2>&1',
-        r'for /d %x in ("C:\Windows\Temp\*") do @rd /s /q "%x" >nul 2>&1',
+    user_local = (f"{info['profile']}\\AppData\\Local" if info
+                  else os.environ.get("LOCALAPPDATA", r"C:\Windows\Temp"))
+
+    # Pastas cujo conteúdo é seguro apagar (o Windows recria o que precisar).
+    pastas_limpeza = [
+        f"{user_local}\\Temp",                                    # %TEMP% do usuário
+        r"C:\Windows\Temp",                                       # TEMP do sistema
+        r"C:\Windows\Prefetch",                                   # prefetch (recriado pelo Windows)
+        f"{user_local}\\Microsoft\\Windows\\INetCache",          # cache de internet (legado)
+        f"{user_local}\\CrashDumps",                             # despejos de memória de apps
+        r"C:\ProgramData\Microsoft\Windows\WER\ReportQueue",     # relatórios de erro (fila)
+        r"C:\ProgramData\Microsoft\Windows\WER\ReportArchive",   # relatórios de erro (arquivo)
     ]
-    for c in cmds_limpeza:
+    for p in pastas_limpeza:
+        _limpar_dir(p, timeout=120)
+
+    # Cache de miniaturas/ícones (alguns ficam em uso até reiniciar o Explorer)
+    for c in (
+        f'del /q /f "{user_local}\\Microsoft\\Windows\\Explorer\\thumbcache_*.db"',
+        f'del /q /f "{user_local}\\Microsoft\\Windows\\Explorer\\iconcache_*.db"',
+    ):
         try:
-            subprocess.run(c, shell=True, capture_output=True, timeout=60)
+            subprocess.run(c, shell=True, capture_output=True, timeout=30)
         except subprocess.TimeoutExpired:
-            _log("  ⚠  Limpeza de temporários demorou demais (alguns arquivos em uso).", "warn")
+            pass
+
+    # Flush do cache DNS e limpeza do cache de Otimização de Entrega.
+    _run_cmd("ipconfig /flushdns", label="Limpar cache DNS", timeout=30)
+    _run_cmd(
+        'powershell -NoProfile -Command '
+        '"Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue"',
+        label="Limpar cache de Otimização de Entrega", timeout=120,
+    )
     acoes_ok += 1
 
     # ── 5. Cache do Windows Update ────────────────────────────────────────────
@@ -978,6 +1017,14 @@ def _etapa_otimizacao() -> bool:
     _run_cmd("net stop wuauserv /y", label="Parar Windows Update", timeout=15)
     _run_cmd(r'rd /s /q "C:\Windows\SoftwareDistribution\Download"', label="Limpar cache de download", timeout=30)
     _run_cmd("net start wuauserv", label="Reiniciar Windows Update", timeout=15)
+    acoes_ok += 1
+
+    # ── 5b. Limpeza profunda do armazenamento de componentes (WinSxS) ─────────
+    # StartComponentCleanup remove versões antigas de componentes/atualizações.
+    # É seguro (não quebra o Windows), mas pode levar alguns minutos.
+    _log("  > Limpeza profunda de componentes (WinSxS) — pode levar alguns minutos...", "muted")
+    _run_cmd("dism /online /cleanup-image /startcomponentcleanup",
+             label="DISM: StartComponentCleanup", timeout=1800)
     acoes_ok += 1
 
     # ── 6. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
@@ -1012,29 +1059,27 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
     _log(f"  Log completo: {_LOG_FILE}", "muted")
     _log("=" * 52, "muted")
 
-    # Etapa 1: Downloads (Opcional)
+    # ── Etapa 1: Instalação de softwares (independente das demais) ────────────
     if instalar_softwares:
         if not _etapa_downloads(sw_lista):
             erros.append("downloads")
     else:
-        _log("\n  [INFO] Pulando etapa de downloads conforme solicitado.", "info")
-        _etapa_inicio("downloads", 5)
-        _log("  Etapa ignorada pelo usuário.", "muted")
-        _etapa_fim("downloads", True, 30)
+        _log("\n  [INFO] Instalação de softwares não selecionada — pulando.", "info")
+        _etapa_pulada("downloads", 30)
 
-    _etapa_wallpaper()          # wallpaper: falha não é crítica
-    if not _etapa_rede():
-        erros.append("rede")
-    if not _etapa_smb():
-        erros.append("smb")
-
-    # Etapa Final: Otimização (Opcional)
+    # ── Etapa 2: Otimização + Personalização (wallpaper, rede, SMB, limpeza) ──
+    # Tudo isto só roda quando a opção "Otimização do Windows" está marcada.
     if otimizacao:
+        _etapa_wallpaper()              # wallpaper: falha não é crítica
+        if not _etapa_rede():
+            erros.append("rede")
+        if not _etapa_smb():
+            erros.append("smb")
         _etapa_otimizacao()
     else:
-        _log("\n  [INFO] Pulando etapa de otimização.", "info")
-        _etapa_inicio("otimizacao", 92)
-        _etapa_fim("otimizacao", True, 100)
+        _log("\n  [INFO] Otimização não selecionada — pulando personalização, rede, SMB e limpeza.", "info")
+        for _et, _pct in (("wallpaper", 38), ("rede", 80), ("smb", 88), ("otimizacao", 100)):
+            _etapa_pulada(_et, _pct)
 
     duracao = int((datetime.now() - inicio).total_seconds())
     _log("\n" + "=" * 52, "muted")

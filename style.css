@@ -345,33 +345,19 @@ input:checked + .slider:before {
   transition: color 0.3s;
 }
 
-/* ── Log box — altura fixa menor ── */
-.log-box {
-  background: var(--bg-log);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-  height: 200px;
-  overflow-y: auto;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-  line-height: 1.7;
-  scroll-behavior: smooth;
+/* ── Estado "Ignorado" (etapa não selecionada nas opções) ── */
+.custom-radio.skipped {
+  border-color: var(--text-muted);
+  border-style: dashed;
+  opacity: 0.55;
 }
 
-.log-box::-webkit-scrollbar { width: 4px; }
-.log-box::-webkit-scrollbar-track { background: transparent; }
-.log-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-.log-placeholder { color: var(--text-muted); font-style: italic; }
-
-.log-line       { display: block; }
-.log-line.ok    { color: var(--green);  }
-.log-line.info  { color: var(--blue);   }
-.log-line.warn  { color: var(--yellow); }
-.log-line.err   { color: var(--red);    }
-.log-line.muted { color: var(--text-muted); }
+.step-badge.skipped {
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: var(--bg-input);
+  opacity: 0.8;
+}
 
 /* ── Botão Executar ── */
 .btn-executar {

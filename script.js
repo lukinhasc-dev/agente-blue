@@ -24,16 +24,10 @@ function setProgress(pct, text, finalOk) {
   l.style.color = finalOk ? 'var(--green)' : '';
 }
 
-function appendLog(msg, tipo) {
-  const box  = document.getElementById('logBox');
-  // Remove placeholder na primeira mensagem real
-  const ph = box.querySelector('.log-placeholder');
-  if (ph) ph.remove();
-  const line = document.createElement('span');
-  line.className   = 'log-line ' + (tipo || 'muted');
-  line.textContent = msg;
-  box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+// Log da interface removido: o detalhamento completo aparece no console (CMD)
+// que o agente já abre. Aqui apenas espelhamos no console do navegador.
+function appendLog(msg) {
+  try { console.log(msg); } catch (e) { /* noop */ }
 }
 
 function setStepState(etapa, state, badgeText) {
@@ -113,6 +107,11 @@ function handleEvent(event) {
       setProgress(e.pct, e.pct + '%');
       break;
 
+    case 'etapa_pulada':
+      setStepState(e.etapa, 'skipped', 'Ignorado');
+      setProgress(e.pct, e.pct + '%');
+      break;
+
     case 'sw_progress':
       updateSwProgress(e.nome, e.estado, e.pct || 0);
       break;
@@ -150,8 +149,6 @@ function iniciarAgente() {
   const btn = document.getElementById('btnExecutar');
 
   // Reset visual
-  document.getElementById('logBox').innerHTML =
-    '<span class="log-placeholder">Os logs de execução aparecerão aqui.</span>';
   const bar = document.getElementById('progressBar');
   bar.style.width = '0%';
   bar.className   = 'progress-bar';
@@ -287,10 +284,11 @@ document.getElementById('chkSoftwares').addEventListener('change', (e) => {
 });
 
 document.getElementById('chkOtimizacao').addEventListener('change', (e) => {
-  const step = document.getElementById('step-otimizacao');
-  if (e.target.checked) {
-    step.style.opacity = '1';
-  } else {
-    step.style.opacity = '0.4';
-  }
+  // Otimização engloba a personalização: wallpaper, rede, SMB e limpeza.
+  const steps = ['wallpaper', 'rede', 'smb', 'otimizacao'];
+  const op = e.target.checked ? '1' : '0.4';
+  steps.forEach(id => {
+    const el = document.getElementById('step-' + id);
+    if (el) el.style.opacity = op;
+  });
 });
