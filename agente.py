@@ -118,13 +118,10 @@ SOFTWARES: List[dict] = [
     },
     {
         "nome": "Slack",
-        "metodo": "url",
-        "url": "https://slack.com/ssb/download-win64",
-        "filename": "SlackSetup.exe",
-        "args": "",                # instalador Squirrel: instala silencioso por padrão
+        "metodo": "winget",
+        "winget_id": "Slack.Slack",
         "ok_codes": {0},
-        "detect": None,
-        "user_context": True,      # Slack é por-usuário → instalar no usuário logado
+        "detect": r"C:\Program Files\Slack\slack.exe",
     },
     {
         "nome": "Adobe Acrobat Reader",
@@ -692,8 +689,8 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
             # Regra de Firewall para o AnyDesk (garante conexão).
             if app.get("firewall") and detect:
                 _log("  ⚡  Liberando AnyDesk no Firewall...", "muted")
-                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=in action=allow program="{detect}" enable=yes', label="Firewall: AnyDesk Inbound")
-                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue" dir=out action=allow program="{detect}" enable=yes', label="Firewall: AnyDesk Outbound")
+                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue_In" dir=in action=allow program="{detect}" enable=yes', label="Firewall: AnyDesk Inbound")
+                _run_cmd(f'netsh advfirewall firewall add rule name="AnyDesk_Blue_Out" dir=out action=allow program="{detect}" enable=yes', label="Firewall: AnyDesk Outbound")
         else:
             _log(f"  ⚠  Instalação de {nome} pode ter falhado (verifique o log).", "warn")
             _sw_progress(nome, "erro", 0)
