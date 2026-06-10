@@ -701,19 +701,61 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
     return etapa_ok
 
 
+def _aplicar_wallpaper_usuario(wallpaper_path: str) -> None:
+    """Aplica o wallpaper no contexto do usuário LOGADO via SystemParametersInfo
+    (SPI_SETDESKWALLPAPER=20) — método correto da API do Windows, bem mais confiável
+    que UpdatePerUserSystemParameters. Gera um .ps1 (P/Invoke) e o executa no usuário
+    logado. Falha aqui não é crítica: o caminho já está no registro e é reaplicado no
+    próximo refresh / reinício do Explorer."""
+    script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    try:
+        script_dir.mkdir(parents=True, exist_ok=True)
+        ps1 = script_dir / "apply_wallpaper.ps1"
+        esc_path = wallpaper_path.replace("'", "''")
+        # SPI_SETDESKWALLPAPER=20, SPIF_UPDATEINIFILE|SPIF_SENDWININICHANGE=3
+        ps1.write_text(
+            'Add-Type @"\n'
+            'using System;\n'
+            'using System.Runtime.InteropServices;\n'
+            'public class Wp {\n'
+            '  [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]\n'
+            '  public static extern int SystemParametersInfo(int a, int u, string p, int f);\n'
+            '}\n'
+            '"@\n'
+            f"[Wp]::SystemParametersInfo(20, 0, '{esc_path}', 3) | Out-Null\n",
+            encoding="utf-8",
+        )
+        cmd_file = script_dir / "apply_wallpaper.cmd"
+        cmd_file.write_text(
+            "@echo off\r\n"
+            f'powershell -NoProfile -ExecutionPolicy Bypass -File "{ps1}"\r\n',
+            encoding="ascii",
+        )
+        _run_as_logged_user(str(cmd_file), label="Aplicar wallpaper no usuário logado")
+    except Exception as exc:
+        _log(f"  ⚠  Falha ao aplicar wallpaper no usuário: {exc}", "warn")
+
+
 def _etapa_wallpaper() -> bool:
     _etapa_inicio("wallpaper", 32)
 
-    # ── Localizar arquivo embutido ou externo ────────────────────────────────
-    candidatos: List[Path] = []
-    for nome in _WALLPAPER_NAMES:
-        candidatos.append(_BASE_DIR / nome)                      # _MEIPASS (embutido no exe)
-        candidatos.append(Path(sys.executable).parent / nome)   # pasta do .exe (externo)
-
+    # ── Localizar arquivo externo (editável) ou embutido (fallback) ───────────
+    # A imagem fica na subpasta img/. Procura na raiz E em img/ de cada local:
+    # pasta do .exe (externo, editável) e _BUNDLE_DIR (cópia embutida no exe).
+    exe_dir = Path(sys.executable).resolve().parent
+    search_dirs = [
+        _BASE_DIR, _BASE_DIR / "img",            # ao lado do exe / script
+        exe_dir, exe_dir / "img",                # pasta do .exe (externo)
+        _BUNDLE_DIR, _BUNDLE_DIR / "img",        # embutido no exe (fallback)
+    ]
     src: Optional[Path] = None
-    for c in candidatos:
-        if c.exists():
-            src = c.resolve()
+    for d in search_dirs:
+        for nome in _WALLPAPER_NAMES:
+            cand = d / nome
+            if cand.exists():
+                src = cand.resolve()
+                break
+        if src is not None:
             break
 
     if src is None:
@@ -747,8 +789,10 @@ def _etapa_wallpaper() -> bool:
     _run_cmd(f'reg add "{reg_desk}" /v TileWallpaper /t REG_SZ /d 0 /f',
              label="Wallpaper: sem lado a lado")
 
-    # Aplica imediatamente no contexto do usuário logado.
-    _refresh_user_session(restart_explorer=False)
+    # Aplica imediatamente no contexto do usuário logado via SystemParametersInfo
+    # (mais confiável que UpdatePerUserSystemParameters). O caminho também ficou no
+    # registro, então é reforçado no próximo refresh / reinício do Explorer.
+    _aplicar_wallpaper_usuario(wallpaper_path)
 
     _etapa_fim("wallpaper", ok, 38)
     return ok

@@ -9,6 +9,7 @@
 #       -> dist\AgenteBlue.exe  (arquivo unico, comodo pro pendrive).
 #          Os assets html/js/css ficam EMBUTIDOS no exe.
 
+import glob
 import os
 
 ONEFILE = os.environ.get('AGENTEBLUE_ONEFILE') == '1'
@@ -17,6 +18,10 @@ ONEFILE = os.environ.get('AGENTEBLUE_ONEFILE') == '1'
 datas = [(f, '.') for f in ('index.html', 'script.js', 'style.css') if os.path.exists(f)]
 if os.path.exists('img/Icone-Blue.ico'):
     datas.append(('img/Icone-Blue.ico', 'img'))
+# Wallpaper embutido: vai para img/ dentro do bundle, garantindo que esteja
+# sempre disponivel mesmo sem copiar "Fundo de Tela.*" ao lado do exe.
+for _wp in glob.glob('img/Fundo de Tela.*'):
+    datas.append((_wp, 'img'))
 
 icon_file = 'img/Icone-Blue.ico' if os.path.exists('img/Icone-Blue.ico') else None
 

@@ -144,7 +144,8 @@ Write-Host "   Tam:  $mb MB    Data: $($exe.LastWriteTime)" -ForegroundColor Gre
 Write-Host " ===================================================" -ForegroundColor Green
 Write-Host ""
 if ($Onefile) {
-    Write-Host " Entrega: copie este .exe + a pasta apps\ + Fundo de Tela.jpg para o pendrive." -ForegroundColor DarkGray
+    Write-Host " Entrega: copie apenas este .exe (interface, icone e wallpaper ja embutidos)." -ForegroundColor DarkGray
+    Write-Host "          A pasta apps\ e opcional (instaladores offline)." -ForegroundColor DarkGray
 } else {
     Write-Host " Dica: alterou so a interface (html/js/css)? Use:" -ForegroundColor DarkGray
     Write-Host "   .\compilar.ps1 -AssetsOnly   (atualiza sem recompilar)" -ForegroundColor DarkGray
