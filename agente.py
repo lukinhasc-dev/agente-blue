@@ -103,11 +103,9 @@ SOFTWARES: List[dict] = [
     },
     {
         "nome": "Google Chrome",
-        "metodo": "url",
-        "url": "https://dl.google.com/chrome/install/standalonesetup64.exe",
-        "filename": "ChromeStandaloneSetup64.exe",
-        "args": "/silent /install",
-        "ok_codes": {0, 1603, 3010},
+        "metodo": "winget",
+        "winget_id": "Google.Chrome",
+        "ok_codes": {0, 3010},
         "detect": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     },
     {
@@ -121,13 +119,10 @@ SOFTWARES: List[dict] = [
     },
     {
         "nome": "Slack",
-        "metodo": "url",
-        "url": "https://slack.com/ssb/download-win64",
-        "filename": "SlackSetup.exe",
-        "args": "",                # instalador Squirrel: instala silencioso por padrão
-        "ok_codes": {0},
+        "metodo": "winget",
+        "winget_id": "SlackTechnologies.Slack",
+        "ok_codes": {0, 3010},
         "detect": None,
-        "user_context": True,      # Slack é por-usuário → instalar no usuário logado
     },
     {
         "nome": "Adobe Acrobat Reader",
@@ -388,6 +383,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
 # ══════════════════════════════════════════════
 
 _WINGET_OK: Optional[bool] = None
+_WINGET_SOURCE_UPDATED: bool = False
 
 
 def _winget_disponivel() -> bool:
@@ -643,6 +639,22 @@ def _instalar_via_url(app: dict) -> bool:
                     ok_codes=ok_codes, detach=True)
 
 
+def _winget_source_update() -> None:
+    """Atualiza o cache de fontes do winget (roda apenas uma vez por sessão).
+    Previne o erro 0x8a15000f (Data required by the source is missing).
+    Se source update falhar (banco corrompido), faz reset forçado e tenta de novo."""
+    global _WINGET_SOURCE_UPDATED
+    if _WINGET_SOURCE_UPDATED:
+        return
+    _WINGET_SOURCE_UPDATED = True
+    _log("  🔄  Atualizando fontes do winget...", "muted")
+    ok = _run_cmd("winget source update", label="winget: atualizar fontes", timeout=120)
+    if not ok:
+        _log("  ⚠  source update falhou — aplicando reset forçado das fontes...", "warn")
+        _run_cmd("winget source reset --force", label="winget: reset de fontes", timeout=120)
+        _run_cmd("winget source update", label="winget: atualizar fontes (retry)", timeout=120)
+
+
 def _instalar_via_winget(app: dict) -> bool:
     """Instala via Windows Package Manager (winget), provisionando-o se faltar."""
     nome = app["nome"]
@@ -650,6 +662,7 @@ def _instalar_via_winget(app: dict) -> bool:
     if not _ensure_winget():
         _log(f"  ✗  winget indisponível — não foi possível instalar {nome}.", "err")
         return False
+    _winget_source_update()
     cmd = (
         f"winget install --id {app['winget_id']} --exact --silent "
         "--accept-package-agreements --accept-source-agreements "
