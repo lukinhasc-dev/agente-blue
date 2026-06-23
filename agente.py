@@ -48,14 +48,14 @@ _NET_PASS: str = "teste123"
 #  CAMINHOS
 # ─────────────────────────────────────────────
 if getattr(sys, "frozen", False):
-    # Build onedir: o .exe e os assets (html/js/css, apps/, wallpaper) ficam na
-    # MESMA pasta — editáveis sem recompilar. _BUNDLE_DIR é o fallback embutido
-    # (pasta _internal), usado quando um asset externo não está presente.
     _BASE_DIR = Path(sys.executable).resolve().parent
     _BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", _BASE_DIR))
 else:
     _BASE_DIR = Path(__file__).resolve().parent
     _BUNDLE_DIR = _BASE_DIR
+
+# Pasta com instaladores locais (Chrome, Adobe, WinRAR, Office)
+_EXE_DIR = _BASE_DIR / ".exe"
 
 _LOG_FILE = Path(os.environ.get("TEMP", "C:\\Temp")) / "agente_blue.log"
 
@@ -81,14 +81,12 @@ log = logging.getLogger("agente-blue")
 
 # ─────────────────────────────────────────────
 #  CATÁLOGO DE SOFTWARES
-#  Sem instaladores embutidos. Cada app é instalado por um de dois métodos:
-#    metodo="url"    → baixa o instalador oficial e roda silencioso
-#                      (exe normal, ou msiexec quando "msi": True)
-#    metodo="winget" → instala via Windows Package Manager (winget_id)
-#  Campos:
-#    nome     : rótulo (precisa bater com data-sw do index.html)
-#    detect   : caminho que, se existir, indica que já está instalado (pula)
-#    ok_codes : códigos de saída tratados como sucesso (padrão {0})
+#    metodo="url"   → baixa o instalador e roda silencioso
+#    metodo="local" → usa executável da pasta .exe/ ao lado do agente
+#    metodo="winget"→ instala via Windows Package Manager
+#  nome     : deve bater com data-sw do index.html
+#  detect   : caminho que indica instalação já existente (pula)
+#  ok_codes : códigos de saída tratados como sucesso (padrão {0})
 # ─────────────────────────────────────────────
 SOFTWARES: List[dict] = [
     {
@@ -103,8 +101,9 @@ SOFTWARES: List[dict] = [
     },
     {
         "nome": "Google Chrome",
-        "metodo": "winget",
-        "winget_id": "Google.Chrome",
+        "metodo": "local",
+        "filename": "ChromeSetup.exe",
+        "args": "/silent /install",
         "ok_codes": {0, 3010},
         "detect": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     },
@@ -126,22 +125,25 @@ SOFTWARES: List[dict] = [
     },
     {
         "nome": "Adobe Acrobat Reader",
-        "metodo": "winget",
-        "winget_id": "Adobe.Acrobat.Reader.64-bit",
+        "metodo": "local",
+        "filename": "AcroRdrDC.exe",
+        "args": "/sAll /rs /msi EULA_ACCEPT=YES",
         "ok_codes": {0},
         "detect": r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
     },
     {
         "nome": "Microsoft 365",
-        "metodo": "winget",
-        "winget_id": "Microsoft.Office",
+        "metodo": "local",
+        "filename": "OfficeSetup.exe",
+        "args": "",
         "ok_codes": {0},
         "detect": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
     },
     {
         "nome": "WinRAR",
-        "metodo": "winget",
-        "winget_id": "RARLab.WinRAR",
+        "metodo": "local",
+        "filename": "WinRAR.exe",
+        "args": "/s",
         "ok_codes": {0},
         "detect": r"C:\Program Files\WinRAR\WinRAR.exe",
     },
@@ -375,8 +377,6 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
     except Exception as exc:
         _log(f"  ✗  Exceção: {exc}", "err")
         return False
-
-# (função _install_adobe_via_task removida — Adobe agora via download direto)
 
 # ══════════════════════════════════════════════
 #  WINGET (Windows Package Manager)
@@ -655,6 +655,32 @@ def _winget_source_update() -> None:
         _run_cmd("winget source update", label="winget: atualizar fontes (retry)", timeout=120)
 
 
+def _instalar_via_local(app: dict) -> bool:
+    """Instala a partir de um executável presente na pasta .exe/ ao lado do agente."""
+    nome = app["nome"]
+    filename = app["filename"]
+    arquivo = _EXE_DIR / filename
+
+    if not arquivo.exists():
+        _log(f"  ✗  Instalador não encontrado: {arquivo}", "err")
+        _log(f"     Coloque '{filename}' na pasta '.exe/' e tente novamente.", "warn")
+        return False
+
+    _log(f"  📦  Instalador local encontrado: {arquivo}", "ok")
+    _sw_progress(nome, "instalando", 50)
+
+    ok_codes = app.get("ok_codes", {0})
+    args = app.get("args", "")
+
+    if app.get("msi"):
+        cmd = f'msiexec /i "{arquivo}" {args}'
+    else:
+        cmd = f'"{arquivo}" {args}'.rstrip()
+
+    return _run_cmd(cmd, label=f"Instalando {nome}", timeout=1800,
+                    ok_codes=ok_codes, detach=True)
+
+
 def _instalar_via_winget(app: dict) -> bool:
     """Instala via Windows Package Manager (winget), provisionando-o se faltar."""
     nome = app["nome"]
@@ -698,8 +724,11 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
             continue
 
         # Instala pelo método declarado.
-        if app.get("metodo") == "winget":
+        metodo = app.get("metodo")
+        if metodo == "winget":
             ok = _instalar_via_winget(app)
+        elif metodo == "local":
+            ok = _instalar_via_local(app)
         else:
             ok = _instalar_via_url(app)
 
