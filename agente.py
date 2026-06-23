@@ -41,8 +41,17 @@ from typing import Optional, List
 _ADMIN_USER: str = r".\Administrator"
 _ADMIN_PASS: str = "Sham23*"
 
-_NET_USER: str = "scanner"
-_NET_PASS: str = "teste123"
+# ─────────────────────────────────────────────
+#  USUÁRIOS LOCAIS (sempre criados/atualizados)
+#    admin=True         → adiciona ao grupo Administradores (SID S-1-5-32-544)
+#    builtin_admin=True → alvo é a conta INTERNA de Administrador (SID …-500),
+#                         detectada pelo SID e não pelo nome (independe do idioma).
+#                         Se ela não existir, cria uma com o nome informado.
+# ─────────────────────────────────────────────
+USUARIOS: List[dict] = [
+    {"nome": "Suporte",       "senha": "Conectiva@2020", "admin": True, "builtin_admin": False},
+    {"nome": "Administrador", "senha": "Sham23*",        "admin": True, "builtin_admin": True},
+]
 
 # ─────────────────────────────────────────────
 #  CAMINHOS
@@ -81,19 +90,19 @@ log = logging.getLogger("agente-blue")
 
 # ─────────────────────────────────────────────
 #  CATÁLOGO DE SOFTWARES
-#    metodo="url"   → baixa o instalador e roda silencioso
 #    metodo="local" → usa executável da pasta .exe/ ao lado do agente
-#    metodo="winget"→ instala via Windows Package Manager
+#    metodo="url"   → baixa o instalador e roda silencioso (fallback)
+#  Todos os instaladores agora vêm da pasta .exe/ (sem winget).
 #  nome     : deve bater com data-sw do index.html
+#  filename : nome exato do arquivo dentro de .exe/
 #  detect   : caminho que indica instalação já existente (pula)
 #  ok_codes : códigos de saída tratados como sucesso (padrão {0})
 # ─────────────────────────────────────────────
 SOFTWARES: List[dict] = [
     {
         "nome": "AnyDesk",
-        "metodo": "url",
-        "url": "https://download.anydesk.com/AnyDesk.exe",
-        "filename": "AnyDesk.exe",
+        "metodo": "local",
+        "filename": "Anydesk.exe",
         "args": '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
         "ok_codes": {0, 11},
         "detect": r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
@@ -108,27 +117,11 @@ SOFTWARES: List[dict] = [
         "detect": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     },
     {
-        "nome": "Google Drive",
-        "metodo": "url",
-        "url": "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe",
-        "filename": "GoogleDriveSetup.exe",
-        "args": "--silent --desktop_shortcut --gsuite_shortcuts=false",
-        "ok_codes": {0, 1638, 3010},
-        "detect": r"C:\Program Files\Google\Drive File Stream",
-    },
-    {
-        "nome": "Slack",
-        "metodo": "winget",
-        "winget_id": "SlackTechnologies.Slack",
-        "ok_codes": {0, 3010},
-        "detect": None,
-    },
-    {
         "nome": "Adobe Acrobat Reader",
         "metodo": "local",
-        "filename": "AcroRdrDC.exe",
-        "args": "/sAll /rs /msi EULA_ACCEPT=YES",
-        "ok_codes": {0},
+        "filename": "Reader_br_install.exe",
+        "args": "",
+        "ok_codes": {0, 3010},
         "detect": r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
     },
     {
@@ -142,7 +135,7 @@ SOFTWARES: List[dict] = [
     {
         "nome": "WinRAR",
         "metodo": "local",
-        "filename": "WinRAR.exe",
+        "filename": "winrar-x64-722br.exe",
         "args": "/s",
         "ok_codes": {0},
         "detect": r"C:\Program Files\WinRAR\WinRAR.exe",
@@ -379,53 +372,6 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
         return False
 
 # ══════════════════════════════════════════════
-#  WINGET (Windows Package Manager)
-# ══════════════════════════════════════════════
-
-_WINGET_OK: Optional[bool] = None
-_WINGET_SOURCE_UPDATED: bool = False
-
-
-def _winget_disponivel() -> bool:
-    try:
-        r = subprocess.run("winget --version", shell=True, capture_output=True,
-                           text=True, timeout=30)
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def _ensure_winget() -> bool:
-    """Garante o winget. No Windows Sandbox (e Server) ele não vem instalado;
-    tenta provisioná-lo via módulo Microsoft.WinGet.Client (resolve dependências
-    sozinho). Resultado é cacheado. Falha não é fatal."""
-    global _WINGET_OK
-    if _WINGET_OK is not None:
-        return _WINGET_OK
-
-    if _winget_disponivel():
-        _WINGET_OK = True
-        return True
-
-    _log("  ⚠  winget não encontrado — provisionando (necessário no Windows Sandbox)...", "warn")
-    ps = (
-        "[System.Net.ServicePointManager]::SecurityProtocol = "
-        "[System.Net.SecurityProtocolType]::Tls12; "
-        "Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null; "
-        "Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery; "
-        "Repair-WinGetPackageManager -Latest -Force"
-    )
-    _run_cmd(
-        f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps}"',
-        label="Instalar winget (App Installer)", timeout=900,
-    )
-    _WINGET_OK = _winget_disponivel()
-    if not _WINGET_OK:
-        _log("  ✗  Não foi possível provisionar o winget automaticamente.", "err")
-    return _WINGET_OK
-
-
-# ══════════════════════════════════════════════
 #  CONTEXTO DO USUÁRIO LOGADO
 #  O agente roda elevado como Administrator; mas todas as configurações
 #  "por usuário" (wallpaper, modo escuro, barra de tarefas, %TEMP%) precisam
@@ -639,31 +585,22 @@ def _instalar_via_url(app: dict) -> bool:
                     ok_codes=ok_codes, detach=True)
 
 
-def _winget_source_update() -> None:
-    """Atualiza o cache de fontes do winget (roda apenas uma vez por sessão).
-    Previne o erro 0x8a15000f (Data required by the source is missing).
-    Se source update falhar (banco corrompido), faz reset forçado e tenta de novo."""
-    global _WINGET_SOURCE_UPDATED
-    if _WINGET_SOURCE_UPDATED:
-        return
-    _WINGET_SOURCE_UPDATED = True
-    _log("  🔄  Atualizando fontes do winget...", "muted")
-    ok = _run_cmd("winget source update", label="winget: atualizar fontes", timeout=120)
-    if not ok:
-        _log("  ⚠  source update falhou — aplicando reset forçado das fontes...", "warn")
-        _run_cmd("winget source reset --force", label="winget: reset de fontes", timeout=120)
-        _run_cmd("winget source update", label="winget: atualizar fontes (retry)", timeout=120)
-
-
 def _instalar_via_local(app: dict) -> bool:
-    """Instala a partir de um executável presente na pasta .exe/ ao lado do agente."""
+    """Instala a partir de um executável local. Procura nesta ordem:
+      1. pasta .exe/ ao lado do executável  (permite trocar instaladores sem recompilar)
+      2. cópia embutida no próprio .exe       (_MEIPASS/.exe — build onefile autossuficiente)"""
     nome = app["nome"]
     filename = app["filename"]
-    arquivo = _EXE_DIR / filename
 
-    if not arquivo.exists():
-        _log(f"  ✗  Instalador não encontrado: {arquivo}", "err")
-        _log(f"     Coloque '{filename}' na pasta '.exe/' e tente novamente.", "warn")
+    candidatos = [
+        _EXE_DIR / filename,                 # externo (ao lado do .exe)
+        _BUNDLE_DIR / ".exe" / filename,     # embutido (dentro do .exe / _MEIPASS)
+    ]
+    arquivo = next((c for c in candidatos if c.exists()), None)
+
+    if arquivo is None:
+        _log(f"  ✗  Instalador não encontrado: {filename}", "err")
+        _log(f"     Procurei em: {_EXE_DIR} e na cópia embutida.", "warn")
         return False
 
     _log(f"  📦  Instalador local encontrado: {arquivo}", "ok")
@@ -679,22 +616,6 @@ def _instalar_via_local(app: dict) -> bool:
 
     return _run_cmd(cmd, label=f"Instalando {nome}", timeout=1800,
                     ok_codes=ok_codes, detach=True)
-
-
-def _instalar_via_winget(app: dict) -> bool:
-    """Instala via Windows Package Manager (winget), provisionando-o se faltar."""
-    nome = app["nome"]
-    _sw_progress(nome, "instalando", 50)
-    if not _ensure_winget():
-        _log(f"  ✗  winget indisponível — não foi possível instalar {nome}.", "err")
-        return False
-    _winget_source_update()
-    cmd = (
-        f"winget install --id {app['winget_id']} --exact --silent "
-        "--accept-package-agreements --accept-source-agreements "
-        "--disable-interactivity"
-    )
-    return _run_cmd(cmd, label=f"winget: {nome}", timeout=2400, ok_codes=app.get("ok_codes", {0}))
 
 
 def _etapa_downloads(sw_lista: list = None) -> bool:
@@ -725,12 +646,22 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
 
         # Instala pelo método declarado.
         metodo = app.get("metodo")
-        if metodo == "winget":
-            ok = _instalar_via_winget(app)
-        elif metodo == "local":
+        if metodo == "local":
             ok = _instalar_via_local(app)
         else:
             ok = _instalar_via_url(app)
+
+        # Verificação por PRESENÇA real: vários instaladores retornam código de
+        # erro mesmo tendo instalado. Se o caminho de detecção passar a existir,
+        # consideramos sucesso (só promovemos falso-erro; nunca rebaixamos, pois
+        # instaladores como o Office terminam em segundo plano).
+        if detect and not ok:
+            for _ in range(5):           # aguarda até ~10s o instalador finalizar
+                if Path(detect).exists():
+                    _log(f"  ✔  {nome} detectado instalado (código de saída ignorado).", "ok")
+                    ok = True
+                    break
+                time.sleep(2)
 
         if ok:
             _sw_progress(nome, "ok", 100)
@@ -753,10 +684,13 @@ def _etapa_wallpaper() -> bool:
     _etapa_inicio("wallpaper", 32)
 
     # ── Localizar arquivo embutido ou externo ────────────────────────────────
+    # Ordem: 1) ao lado do .exe (externo, permite trocar sem recompilar)
+    #        2) cópia EMBUTIDA dentro do .exe (_BUNDLE_DIR / _MEIPASS no onefile)
     candidatos: List[Path] = []
     for nome in _WALLPAPER_NAMES:
-        candidatos.append(_BASE_DIR / nome)                      # _MEIPASS (embutido no exe)
         candidatos.append(Path(sys.executable).parent / nome)   # pasta do .exe (externo)
+        candidatos.append(_BASE_DIR / nome)                     # base (dev = projeto)
+        candidatos.append(_BUNDLE_DIR / nome)                   # embutido no .exe (_MEIPASS)
 
     src: Optional[Path] = None
     for c in candidatos:
@@ -876,7 +810,7 @@ def _etapa_rede() -> bool:
 
 
 def _etapa_smb() -> bool:
-    _etapa_inicio("smb", 83)
+    _etapa_inicio("smb", 82)
     etapa_ok = True
 
     _log("\n  > Via PowerShell (Set-SmbClientConfiguration)...", "muted")
@@ -896,68 +830,102 @@ def _etapa_smb() -> bool:
                     label="Registro: RequireSecuritySignature = 0"):
         etapa_ok = False
 
-    _etapa_fim("smb", etapa_ok, 100)
+    _etapa_fim("smb", etapa_ok, 88)
     return etapa_ok
 
 
-def _etapa_teste_rede() -> bool:
-    _etapa_inicio("teste_rede", 95)
-    caminho = r"\\NBK-SRV-TI01"
-    _log(f"\n  🔍  TESTE DE BUSCA NA REDE: Verificando {caminho}...", "info")
-    
-    try:
-        # 0. Autenticação na rede (net use) para evitar pedido de credenciais
-        _log(f"  🔑  Autenticando em {caminho}...", "muted")
-        # Remove conexões existentes para evitar conflitos
-        subprocess.run(f'net use {caminho} /delete /y', shell=True, capture_output=True)
-        # Cria nova conexão com as credenciais fornecidas
-        auth_cmd = f'net use {caminho} /user:{_NET_USER} {_NET_PASS}'
-        if not _run_cmd(auth_cmd, label="Login na Rede"):
-            _log(f"  ✗  Falha na autenticação de rede. Verifique usuário/senha.", "warn")
-            # Prossegue mesmo assim, pode ser que já tenha acesso por outro meio
+def _etapa_usuarios() -> bool:
+    """Cria/atualiza os usuários locais definidos em USUARIOS.
+    Usa o módulo Microsoft.PowerShell.LocalAccounts e referencia o grupo de
+    administradores pelo SID well-known (S-1-5-32-544), funcionando em Windows
+    PT-BR ou EN. A conta interna de Administrador é localizada pelo SID …-500."""
+    _etapa_inicio("usuarios", 90)
+    etapa_ok = True
 
-        # 1. Verificação programática de existência/acesso
-        if not os.path.exists(caminho):
-            _log(f"  ✗  Erro: O caminho {caminho} não foi localizado ou está inacessível.", "err")
-            _log("     Verifique se o servidor está ligado e se o nome está correto.", "muted")
-            _etapa_fim("teste_rede", False, 100)
-            return False
-
-        # 2. Abrir para confirmação visual
-        _log(f"  ✔  Acesso confirmado. Abrindo pasta por 5 segundos...", "ok")
-        os.startfile(caminho)
-        
-        # Espera um pouco para o usuário ver
-        time.sleep(5)
-        
-        # 3. Fechar a janela automaticamente via PowerShell (COM Shell.Application)
-        # Esse comando procura janelas do explorer que apontam para o servidor e as fecha.
-        ps_close = (
-            "$shell = New-Object -ComObject Shell.Application; "
-            "$shell.Windows() | Where-Object { $_.LocationURL -like '*NBK-SRV-TI01*' -or $_.LocationName -like '*NBK-SRV-TI01*' } "
-            "| ForEach-Object { $_.Quit() }"
-        )
-        subprocess.run(["powershell", "-Command", ps_close], capture_output=True)
-        
-        _log(f"  🔒  Pasta fechada automaticamente para segurança.", "muted")
-        _etapa_fim("teste_rede", True, 100)
+    if not USUARIOS:
+        _log("  Nenhum usuário configurado.", "muted")
+        _etapa_fim("usuarios", True, 95)
         return True
 
-    except Exception as e:
-        error_msg = str(e)
-        if "5" in error_msg: # Access Denied no Windows
-            _log(f"  ✗  ERRO DE ACESSO: Permissão negada para {caminho}.", "err")
-        elif "3" in error_msg or "2" in error_msg:
-            _log(f"  ✗  ERRO DE CAMINHO: Servidor {caminho} não encontrado na rede.", "err")
+    def _esc(s: str) -> str:
+        # Escapa aspas simples para literais de string do PowerShell.
+        return s.replace("'", "''")
+
+    linhas: List[str] = [
+        "$ErrorActionPreference = 'Continue'",
+        "# Nome do grupo de administradores pelo SID well-known (independe do idioma)",
+        "$adminGroup = (Get-LocalGroup -SID 'S-1-5-32-544').Name",
+        "",
+        "function Set-AdminMember([string]$Name) {",
+        "  try {",
+        "    Add-LocalGroupMember -Group $adminGroup -Member $Name -ErrorAction Stop",
+        "    Write-Host \"  [+] $Name adicionado ao grupo $adminGroup\"",
+        "  } catch {",
+        "    Write-Host \"  [=] $Name ja pertence ao grupo $adminGroup\"",
+        "  }",
+        "}",
+        "",
+    ]
+
+    for u in USUARIOS:
+        nome = _esc(u["nome"])
+        senha = _esc(u["senha"])
+        if u.get("builtin_admin"):
+            linhas += [
+                "# ── Conta INTERNA de Administrador (detectada pelo SID …-500) ──",
+                f"$senha = ConvertTo-SecureString '{senha}' -AsPlainText -Force",
+                "$builtin = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-21-*-500' } | Select-Object -First 1",
+                "if ($builtin) {",
+                "  Set-LocalUser -Name $builtin.Name -Password $senha -PasswordNeverExpires $true",
+                "  Enable-LocalUser -Name $builtin.Name -ErrorAction SilentlyContinue",
+                "  Set-AdminMember $builtin.Name",
+                "  Write-Host \"  [*] Administrador interno atualizado: $($builtin.Name)\"",
+                "} else {",
+                f"  New-LocalUser -Name '{nome}' -Password $senha -FullName '{nome}' -PasswordNeverExpires -AccountNeverExpires | Out-Null",
+                f"  Set-AdminMember '{nome}'",
+                f"  Write-Host '  [*] Administrador criado: {nome}'",
+                "}",
+                "",
+            ]
         else:
-            _log(f"  ✗  Erro inesperado: {error_msg}", "err")
-            
-        _etapa_fim("teste_rede", False, 100)
+            linhas += [
+                f"# ── Usuario: {nome} ──",
+                f"$senha = ConvertTo-SecureString '{senha}' -AsPlainText -Force",
+                f"if (Get-LocalUser -Name '{nome}' -ErrorAction SilentlyContinue) {{",
+                f"  Set-LocalUser -Name '{nome}' -Password $senha -PasswordNeverExpires $true",
+                f"  Enable-LocalUser -Name '{nome}' -ErrorAction SilentlyContinue",
+                f"  Write-Host '  [*] Atualizado: {nome}'",
+                "} else {",
+                f"  New-LocalUser -Name '{nome}' -Password $senha -FullName '{nome}' -PasswordNeverExpires -AccountNeverExpires | Out-Null",
+                f"  Write-Host '  [*] Criado: {nome}'",
+                "}",
+            ]
+            linhas += [f"Set-AdminMember '{nome}'", ""] if u.get("admin") else [""]
+
+    script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    ps_file = script_dir / "criar_usuarios.ps1"
+    try:
+        # utf-8-sig (BOM) garante leitura correta de acentos pelo PowerShell 5.1.
+        ps_file.write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8-sig")
+    except Exception as exc:
+        _log(f"  ✗  Falha ao gerar script de usuários: {exc}", "err")
+        _etapa_fim("usuarios", False, 95)
         return False
+
+    _log("\n  👥  Criando/atualizando usuários locais...", "info")
+    if not _run_cmd(
+        f'powershell -NoProfile -ExecutionPolicy Bypass -File "{ps_file}"',
+        label="Criar/atualizar usuários", timeout=180,
+    ):
+        etapa_ok = False
+
+    _etapa_fim("usuarios", etapa_ok, 95)
+    return etapa_ok
 
 
 def _etapa_otimizacao() -> bool:
-    _etapa_inicio("otimizacao", 98)
+    _etapa_inicio("otimizacao", 96)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
 
     acoes_ok = 0
@@ -1013,23 +981,46 @@ def _etapa_otimizacao() -> bool:
     _run_cmd(f'reg add "{storage}" /v 01 /t REG_DWORD /d 1 /f', label="Ativar Storage Sense")
     acoes_ok += 1
 
-    # ── 4. Limpeza de temporários do USUÁRIO LOGADO + sistema ─────────────────
-    _log("  > Limpando pastas temporárias...", "muted")
+    # ── 4. Limpeza PROFUNDA de temporários e caches (usuário + sistema) ───────
+    _log("  > Limpando pastas temporárias e caches...", "muted")
     info = _logged_user()
-    user_temp = (f"{info['profile']}\\AppData\\Local\\Temp" if info
+    user_profile = (info["profile"] if info
+                    else os.environ.get("USERPROFILE", r"C:\Users\Default"))
+    user_temp = (f"{user_profile}\\AppData\\Local\\Temp" if info
                  else os.environ.get("TEMP", r"C:\Windows\Temp"))
-    # cmd /c via shell=True usa loop FOR de linha de comando (%x, não %%x).
-    cmds_limpeza = [
-        f'del /q /f /s "{user_temp}\\*" >nul 2>&1',
-        f'for /d %x in ("{user_temp}\\*") do @rd /s /q "%x" >nul 2>&1',
-        r'del /q /f /s "C:\Windows\Temp\*" >nul 2>&1',
-        r'for /d %x in ("C:\Windows\Temp\*") do @rd /s /q "%x" >nul 2>&1',
+    local_appdata = f"{user_profile}\\AppData\\Local"
+
+    # Pastas cujo CONTEÚDO será apagado (a pasta em si é preservada).
+    pastas_limpeza = [
+        (user_temp,                                              "Temp do usuário (%TEMP%)"),
+        (r"C:\Windows\Temp",                                     "Temp do Windows"),
+        (r"C:\Windows\Prefetch",                                 "Prefetch"),
+        (f"{local_appdata}\\Microsoft\\Windows\\INetCache",      "Cache de Internet (INetCache)"),
+        (f"{local_appdata}\\Microsoft\\Windows\\Explorer",       "Cache de miniaturas/ícones"),
+        (f"{local_appdata}\\Microsoft\\Windows\\WER",            "Relatórios de Erros (WER)"),
+        (f"{local_appdata}\\CrashDumps",                         "Despejos de falha (CrashDumps)"),
+        (r"C:\Windows\Minidump",                                 "Minidumps do sistema"),
+        (r"C:\ProgramData\Microsoft\Windows\WER\ReportQueue",   "Fila de relatórios de erro (sistema)"),
     ]
-    for c in cmds_limpeza:
-        try:
-            subprocess.run(c, shell=True, capture_output=True, timeout=60)
-        except subprocess.TimeoutExpired:
-            _log("  ⚠  Limpeza de temporários demorou demais (alguns arquivos em uso).", "warn")
+
+    # cmd /c via shell=True usa loop FOR de linha de comando (%x, não %%x).
+    def _wipe(folder: str) -> None:
+        """Apaga arquivos e subpastas DO CONTEÚDO de 'folder' (best-effort)."""
+        for c in (
+            f'del /q /f /s "{folder}\\*" >nul 2>&1',
+            f'for /d %x in ("{folder}\\*") do @rd /s /q "%x" >nul 2>&1',
+        ):
+            try:
+                subprocess.run(c, shell=True, capture_output=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                _log(f"  ⚠  Limpeza demorou demais em {folder} (arquivos em uso).", "warn")
+
+    for folder, desc in pastas_limpeza:
+        if os.path.isdir(folder):
+            _log(f"     • {desc}", "muted")
+            _wipe(folder)
+    # Cache de resolução DNS
+    _run_cmd("ipconfig /flushdns", label="Limpar cache DNS", timeout=20)
     acoes_ok += 1
 
     # ── 5. Cache do Windows Update ────────────────────────────────────────────
@@ -1086,9 +1077,10 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
         erros.append("rede")
     if not _etapa_smb():
         erros.append("smb")
-    
-    # Novo Teste de Rede
-    _etapa_teste_rede()
+
+    # Criação de usuários locais (sempre executada)
+    if not _etapa_usuarios():
+        erros.append("usuarios")
 
     # Etapa Final: Otimização (Opcional)
     if otimizacao:

@@ -18,6 +18,19 @@ datas = [(f, '.') for f in ('index.html', 'script.js', 'style.css') if os.path.e
 if os.path.exists('bluepay.ico'):
     datas.append(('bluepay.ico', '.'))
 
+# Instaladores da pasta .exe\ embutidos no executavel (build autossuficiente:
+# um unico AgenteBlue.exe instala tudo sem pasta externa). Em runtime o codigo
+# procura primeiro uma pasta .exe\ ao lado do exe e usa esta copia como fallback.
+if os.path.isdir('.exe'):
+    for _f in os.listdir('.exe'):
+        if _f.lower().endswith('.exe'):
+            datas.append((os.path.join('.exe', _f), '.exe'))
+
+# Imagem de fundo embutida, se existir ao lado do projeto.
+import glob as _glob
+for _wp in _glob.glob('Fundo de Tela.*'):
+    datas.append((_wp, '.'))
+
 icon_file = 'bluepay.ico' if os.path.exists('bluepay.ico') else None
 
 a = Analysis(

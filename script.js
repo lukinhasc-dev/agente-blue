@@ -3,9 +3,9 @@
 //  SSE + fetch — puro JavaScript, sem dependências
 // ============================================
 
-const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'otimizacao'];
+const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'usuarios', 'otimizacao'];
 let _eventSource = null;
-let _swTotal = 7;   // AnyDesk + Chrome + Drive + Adobe + Slack + Office + WinRAR
+let _swTotal = 5;   // AnyDesk + Chrome + Adobe + Office + WinRAR
 let _swDone  = 0;
 
 // Mapeia nome do software → id CSS (espaços → hífens)
@@ -184,7 +184,7 @@ function iniciarAgente() {
 
   // Reset barras de software
   _swDone = 0;
-  ['AnyDesk', 'Google-Chrome', 'Google-Drive', 'Adobe-Acrobat-Reader', 'Slack', 'Microsoft-365', 'WinRAR'].forEach(id => {
+  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader', 'Microsoft-365', 'WinRAR'].forEach(id => {
     const bar    = document.getElementById('sw-bar-' + id);
     const status = document.getElementById('sw-status-' + id);
     const item   = document.getElementById('sw-' + id);
@@ -252,9 +252,13 @@ function _demoMode() {
     () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  Regras de firewall aplicadas', tipo: 'ok' }) }),
     () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'rede', sucesso: true, pct: 80 }) }),
 
-    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'smb', pct: 83 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'smb', pct: 82 }) }),
     () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  ✔  SMB configurado', tipo: 'ok' }) }),
-    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'smb', sucesso: true, pct: 100 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'smb', sucesso: true, pct: 88 }) }),
+
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_inicio', etapa: 'usuarios', pct: 90 }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'log', msg: '  👥  Usuários Suporte e Administrador criados', tipo: 'ok' }) }),
+    () => handleEvent({ data: JSON.stringify({ type: 'etapa_fim', etapa: 'usuarios', sucesso: true, pct: 95 }) }),
 
     () => handleEvent({ data: JSON.stringify({ type: 'setup_fim', sucesso: true }) }),
   ];
