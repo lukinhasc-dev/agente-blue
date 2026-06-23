@@ -1,0 +1,60 @@
+294 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.6
+294 INFO: Python: 3.11.9
+339 INFO: Platform: Windows-10-10.0.19043-SP0
+339 INFO: Python environment: C:\users\lucas-silva\AppData\Local\Programs\Python\Python311
+343 INFO: Removing temporary files and cleaning cache in C:\users\lucas-silva\AppData\Local\pyinstaller
+351 INFO: Module search paths (PYTHONPATH):
+['Z:\\home\\lucas-silva\\햞ea de trabalho\\agente-blue',
+ 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311',
+ 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages',
+ 'Z:\\home\\lucas-silva\\햞ea de trabalho\\agente-blue']
+856 INFO: Appending 'datas' from .spec
+857 INFO: checking Analysis
+857 INFO: Building Analysis because Analysis-00.toc is non existent
+857 INFO: Looking for Python shared library...
+858 INFO: Using Python shared library: C:\users\lucas-silva\AppData\Local\Programs\Python\Python311\python311.dll
+858 INFO: Running Analysis Analysis-00.toc
+858 INFO: Target bytecode optimization level: 0
+858 INFO: Initializing module dependency graph...
+861 INFO: Initializing module graph hook caches...
+883 INFO: Analyzing modules for base_library.zip ...
+2476 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages\\PyInstaller\\hooks'
+3231 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages\\PyInstaller\\hooks'
+3655 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages\\PyInstaller\\hooks'
+5891 INFO: Caching module dependency graph...
+5926 INFO: Analyzing Z:\home\lucas-silva\햞ea de trabalho\agente-blue\agente.py
+5959 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages\\PyInstaller\\hooks'
+6402 INFO: Processing module hooks (post-graph stage)...
+6406 INFO: Performing binary vs. data reclassification (4 entries)
+6409 INFO: Looking for ctypes DLLs
+6430 INFO: Analyzing run-time hooks ...
+6431 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\users\\lucas-silva\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+6440 INFO: Creating base_library.zip...
+6467 INFO: Looking for dynamic libraries
+6747 INFO: Extra DLL search directories (AddDllDirectory): []
+6747 INFO: Extra DLL search directories (PATH): []
+6969 INFO: Warnings written to Z:\home\lucas-silva\햞ea de trabalho\agente-blue\build\AgenteBlue\warn-AgenteBlue.txt
+6984 INFO: Graph cross-reference written to Z:\home\lucas-silva\햞ea de trabalho\agente-blue\build\AgenteBlue\xref-AgenteBlue.html
+7001 INFO: checking PYZ
+7002 INFO: Building PYZ because PYZ-00.toc is non existent
+7002 INFO: Building PYZ (ZlibArchive) Z:\home\lucas-silva\햞ea de trabalho\agente-blue\build\AgenteBlue\PYZ-00.pyz
+7143 INFO: Building PYZ (ZlibArchive) Z:\home\lucas-silva\햞ea de trabalho\agente-blue\build\AgenteBlue\PYZ-00.pyz completed successfully.
+7153 INFO: checking PKG
+7153 INFO: Building PKG because PKG-00.toc is non existent
+7153 INFO: Building PKG (CArchive) AgenteBlue.pkg
+8778 INFO: Building PKG (CArchive) AgenteBlue.pkg completed successfully.
+8780 INFO: Bootloader C:\users\lucas-silva\AppData\Local\Programs\Python\Python311\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+8780 INFO: checking EXE
+8780 INFO: Building EXE because EXE-00.toc is non existent
+8780 INFO: Building EXE from EXE-00.toc
+8780 INFO: Copying bootloader EXE to Z:\home\lucas-silva\햞ea de trabalho\agente-blue\dist\AgenteBlue.exe
+8796 INFO: Copying icon to EXE
+8799 INFO: Copying 0 resources to EXE
+8799 INFO: Embedding manifest in EXE
+8801 INFO: Appending PKG archive to EXE
+8805 INFO: Fixing EXE headers
+8881 INFO: Building EXE from EXE-00.toc completed successfully.
+8883 INFO: Build complete! The results are available in: Z:\home\lucas-silva\햞ea de trabalho\agente-blue\dist
