@@ -55,4 +55,4 @@ config.json
 # Instaladores grandes (>100 MB) — passam do limite do GitHub.
 # Mantenha-os na pasta .exe local; o build os embute a partir dela.
 .exe/GoogleDriveSetup.exe
-.exe/Slack.msix
+.exe/SlackSetup.exe

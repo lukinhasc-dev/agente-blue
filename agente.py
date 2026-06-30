@@ -606,6 +606,7 @@ def _instalar_via_local(app: dict) -> bool:
       2. cópia embutida no próprio .exe       (_MEIPASS/.exe — build onefile autossuficiente)"""
     nome = app["nome"]
     filename = app["filename"]
+    user_ctx = bool(app.get("user_context"))
 
     candidatos = [
         _EXE_DIR / filename,                 # externo (ao lado do .exe)
@@ -623,6 +624,24 @@ def _instalar_via_local(app: dict) -> bool:
 
     ok_codes = app.get("ok_codes", {0})
     args = app.get("args", "")
+
+    # App por-usuário (ex.: Slack/Squirrel instala em %LocalAppData%): copia o
+    # instalador para ProgramData (legível pelo usuário limitado) e roda no
+    # contexto do usuário logado — senão cairia no perfil do Administrador.
+    if user_ctx and _logged_user():
+        script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        destino = script_dir / filename
+        try:
+            if not destino.exists() or destino.stat().st_size != arquivo.stat().st_size:
+                shutil.copy2(arquivo, destino)
+            cmd = f'"{destino}" {args}'.rstrip()
+            cmd_file = script_dir / "install_user_app.cmd"
+            cmd_file.write_text("@echo off\r\n" + cmd + "\r\n", encoding="ascii")
+        except Exception as exc:
+            _log(f"  ⚠  Falha ao preparar instalação no usuário: {exc}", "warn")
+            return False
+        return _run_as_logged_user(str(cmd_file), label=f"Instalando {nome} (usuário logado)")
 
     suf = arquivo.suffix.lower()
     if suf in (".msix", ".msixbundle", ".appx", ".appxbundle"):

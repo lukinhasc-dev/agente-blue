@@ -78,9 +78,10 @@
     {
       "nome": "Slack",
       "metodo": "local",
-      "filename": "Slack.msix",
+      "filename": "SlackSetup.exe",
       "args": "",
-      "ok_codes": [0]
+      "ok_codes": [0],
+      "user_context": true
     }
   ]
 }
