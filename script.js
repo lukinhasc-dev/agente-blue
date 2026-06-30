@@ -5,7 +5,7 @@
 
 const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'usuarios', 'impressora', 'otimizacao', 'integridade'];
 let _eventSource = null;
-let _swTotal = 5;   // AnyDesk + Chrome + Adobe + Office + WinRAR
+let _swTotal = 7;   // AnyDesk + Chrome + Adobe + Office + WinRAR + Google Drive + Slack
 let _swDone  = 0;
 
 // Mapeia nome do software → id CSS (espaços → hífens)
@@ -184,7 +184,7 @@ function iniciarAgente() {
 
   // Reset barras de software
   _swDone = 0;
-  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader', 'Microsoft-365', 'WinRAR'].forEach(id => {
+  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader', 'Microsoft-365', 'WinRAR', 'Google-Drive', 'Slack'].forEach(id => {
     const bar    = document.getElementById('sw-bar-' + id);
     const status = document.getElementById('sw-status-' + id);
     const item   = document.getElementById('sw-' + id);

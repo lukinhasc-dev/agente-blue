@@ -66,6 +66,21 @@
       "args": "/s",
       "ok_codes": [0],
       "detect": "C:\\Program Files\\WinRAR\\WinRAR.exe"
+    },
+    {
+      "nome": "Google Drive",
+      "metodo": "local",
+      "filename": "GoogleDriveSetup.exe",
+      "args": "--silent",
+      "ok_codes": [0],
+      "detect": "C:\\Program Files\\Google\\Drive File Stream"
+    },
+    {
+      "nome": "Slack",
+      "metodo": "local",
+      "filename": "Slack.msix",
+      "args": "",
+      "ok_codes": [0]
     }
   ]
 }

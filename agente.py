@@ -624,7 +624,15 @@ def _instalar_via_local(app: dict) -> bool:
     ok_codes = app.get("ok_codes", {0})
     args = app.get("args", "")
 
-    if app.get("msi"):
+    suf = arquivo.suffix.lower()
+    if suf in (".msix", ".msixbundle", ".appx", ".appxbundle"):
+        # Pacote MSIX/Appx: não roda como .exe. Provisiona para TODOS os usuários
+        # (contexto de Administrador, sem tarefa de usuário). Pacotes provisionados
+        # são instalados para cada usuário no próximo logon — ideal para máquinas
+        # recém-preparadas, em que os usuários novos recebem o app ao entrar.
+        ps = f"Add-AppxProvisionedPackage -Online -PackagePath '{arquivo}' -SkipLicense"
+        cmd = f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps}"'
+    elif app.get("msi"):
         cmd = f'msiexec /i "{arquivo}" {args}'
     else:
         cmd = f'"{arquivo}" {args}'.rstrip()
