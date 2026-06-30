@@ -47,3 +47,7 @@ venv.bak/
 # Agent Blue Specific
 bluepay.ico
 Fundo de Tela.jpg
+
+# Configuração com segredos (senhas) — NÃO versionar.
+# Use config.example.json como modelo e crie seu config.json local.
+config.json

@@ -21,7 +21,7 @@
         </div>
         <h1 class="app-title">Agente Blue</h1>
         <p class="app-subtitle">Configuração Automática de Estações Windows</p>
-        <p class="app-version">v1.0 — BlueControl IT</p>
+        <p class="app-version">v2.0 — BlueControl IT</p>
       </div>
 
       <!-- Opções -->
@@ -45,6 +45,28 @@
           </div>
           <label class="switch">
             <input type="checkbox" id="chkOtimizacao" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="opt-row" style="margin-top: 12px;">
+          <div class="opt-info">
+            <span class="opt-title">Impressora de Rede</span>
+            <span class="opt-desc">RICOH MP C3003 (IP direto)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chkImpressora" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="opt-row" style="margin-top: 12px;">
+          <div class="opt-info">
+            <span class="opt-title">Verificação de Integridade</span>
+            <span class="opt-desc">SFC + DISM ao final (pode demorar)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chkIntegridade" checked>
             <span class="slider"></span>
           </label>
         </div>
@@ -95,12 +117,28 @@
             <span class="step-badge" id="badge-usuarios">Pendente</span>
           </div>
 
+          <div class="module-item" id="step-impressora">
+            <span class="custom-radio" id="radio-impressora"></span>
+            <span class="module-text">
+              <strong>Impressora</strong> — RICOH MP C3003 na rede
+            </span>
+            <span class="step-badge" id="badge-impressora">Pendente</span>
+          </div>
+
           <div class="module-item" id="step-otimizacao">
             <span class="custom-radio" id="radio-otimizacao"></span>
             <span class="module-text">
               <strong>Otimização</strong> — Limpeza de disco e performance
             </span>
             <span class="step-badge" id="badge-otimizacao">Pendente</span>
+          </div>
+
+          <div class="module-item" id="step-integridade">
+            <span class="custom-radio" id="radio-integridade"></span>
+            <span class="module-text">
+              <strong>Integridade</strong> — Verificação SFC + DISM
+            </span>
+            <span class="step-badge" id="badge-integridade">Pendente</span>
           </div>
 
         </div>

@@ -36,24 +36,6 @@ from pathlib import Path
 from typing import Optional, List
 
 # ─────────────────────────────────────────────
-#  CREDENCIAIS DE ADMINISTRADOR
-# ─────────────────────────────────────────────
-_ADMIN_USER: str = r".\Administrator"
-_ADMIN_PASS: str = "Sham23*"
-
-# ─────────────────────────────────────────────
-#  USUÁRIOS LOCAIS (sempre criados/atualizados)
-#    admin=True         → adiciona ao grupo Administradores (SID S-1-5-32-544)
-#    builtin_admin=True → alvo é a conta INTERNA de Administrador (SID …-500),
-#                         detectada pelo SID e não pelo nome (independe do idioma).
-#                         Se ela não existir, cria uma com o nome informado.
-# ─────────────────────────────────────────────
-USUARIOS: List[dict] = [
-    {"nome": "Suporte",       "senha": "Conectiva@2020", "admin": True, "builtin_admin": False},
-    {"nome": "Administrador", "senha": "Sham23*",        "admin": True, "builtin_admin": True},
-]
-
-# ─────────────────────────────────────────────
 #  CAMINHOS
 # ─────────────────────────────────────────────
 if getattr(sys, "frozen", False):
@@ -65,6 +47,56 @@ else:
 
 # Pasta com instaladores locais (Chrome, Adobe, WinRAR, Office)
 _EXE_DIR = _BASE_DIR / ".exe"
+
+# ─────────────────────────────────────────────
+#  CONFIGURAÇÃO EXTERNA (config.json)
+#    Credenciais, usuários, softwares e impressora ficam fora do código-fonte
+#    (e fora do .exe), num config.json editável ao lado do agente. Assim o
+#    técnico ajusta tudo sem recompilar e nada sensível fica embutido no binário.
+#    Procura nesta ordem: ao lado do .exe → base → cópia embutida (_MEIPASS).
+# ─────────────────────────────────────────────
+
+def _load_config() -> dict:
+    for cand in (_BASE_DIR / "config.json", _BUNDLE_DIR / "config.json"):
+        if cand.exists():
+            try:
+                with open(cand, "r", encoding="utf-8-sig") as fh:
+                    cfg = json.load(fh)
+                print(f"[config] Carregado de: {cand}")
+                return cfg
+            except Exception as exc:
+                print(f"[config] Falha ao ler {cand}: {exc}")
+    print("[config] config.json não encontrado — usando valores padrão internos.")
+    return {}
+
+
+_CONFIG: dict = _load_config()
+
+# ─────────────────────────────────────────────
+#  CREDENCIAIS DE ADMINISTRADOR (de config.json)
+# ─────────────────────────────────────────────
+_admin_cfg: dict = _CONFIG.get("admin", {})
+_ADMIN_USER: str = _admin_cfg.get("usuario", r".\Administrator")
+_ADMIN_PASS: str = _admin_cfg.get("senha", "")
+
+# ─────────────────────────────────────────────
+#  USUÁRIOS LOCAIS (sempre criados/atualizados) — de config.json
+#    admin=True         → adiciona ao grupo Administradores (SID S-1-5-32-544)
+#    builtin_admin=True → alvo é a conta INTERNA de Administrador (SID …-500),
+#                         detectada pelo SID e não pelo nome (independe do idioma).
+#                         Se ela não existir, cria uma com o nome informado.
+# ─────────────────────────────────────────────
+USUARIOS: List[dict] = _CONFIG.get("usuarios", [])
+
+# ─────────────────────────────────────────────
+#  IMPRESSORA DE REDE (de config.json)
+# ─────────────────────────────────────────────
+IMPRESSORA: dict = _CONFIG.get("impressora", {})
+
+# ─────────────────────────────────────────────
+#  VERIFICAÇÃO DE INTEGRIDADE (de config.json)
+# ─────────────────────────────────────────────
+INTEGRIDADE: dict = _CONFIG.get("integridade", {"habilitar": True})
 
 _LOG_FILE = Path(os.environ.get("TEMP", "C:\\Temp")) / "agente_blue.log"
 
@@ -98,49 +130,19 @@ log = logging.getLogger("agente-blue")
 #  detect   : caminho que indica instalação já existente (pula)
 #  ok_codes : códigos de saída tratados como sucesso (padrão {0})
 # ─────────────────────────────────────────────
-SOFTWARES: List[dict] = [
-    {
-        "nome": "AnyDesk",
-        "metodo": "local",
-        "filename": "Anydesk.exe",
-        "args": '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
-        "ok_codes": {0, 11},
-        "detect": r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
-        "firewall": True,
-    },
-    {
-        "nome": "Google Chrome",
-        "metodo": "local",
-        "filename": "ChromeSetup.exe",
-        "args": "/silent /install",
-        "ok_codes": {0, 3010},
-        "detect": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    },
-    {
-        "nome": "Adobe Acrobat Reader",
-        "metodo": "local",
-        "filename": "Reader_br_install.exe",
-        "args": "",
-        "ok_codes": {0, 3010},
-        "detect": r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
-    },
-    {
-        "nome": "Microsoft 365",
-        "metodo": "local",
-        "filename": "OfficeSetup.exe",
-        "args": "",
-        "ok_codes": {0},
-        "detect": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
-    },
-    {
-        "nome": "WinRAR",
-        "metodo": "local",
-        "filename": "winrar-x64-722br.exe",
-        "args": "/s",
-        "ok_codes": {0},
-        "detect": r"C:\Program Files\WinRAR\WinRAR.exe",
-    },
-]
+def _normalizar_softwares(lista: List[dict]) -> List[dict]:
+    """Converte os softwares do config.json para o formato interno.
+    ok_codes vem como lista JSON ([0, 3010]) e precisa virar set ({0, 3010})."""
+    out: List[dict] = []
+    for app in lista:
+        app = dict(app)  # cópia rasa para não mutar o config original
+        codes = app.get("ok_codes", [0])
+        app["ok_codes"] = set(codes) if isinstance(codes, (list, set, tuple)) else {0}
+        out.append(app)
+    return out
+
+
+SOFTWARES: List[dict] = _normalizar_softwares(_CONFIG.get("softwares", []))
 
 # ─────────────────────────────────────────────
 #  FILA SSE
@@ -202,8 +204,14 @@ class AgenteHandler(http.server.SimpleHTTPRequestHandler):
             instalar = params.get("instalar_softwares", True)
             otimizar = params.get("otimizacao", True)
             sw_lista = params.get("softwares_selecionados", [])
-            
-            threading.Thread(target=run_automation, args=(instalar, otimizar, sw_lista), daemon=True).start()
+            impressora = params.get("instalar_impressora", True)
+            integridade = params.get("verificar_integridade", True)
+
+            threading.Thread(
+                target=run_automation,
+                args=(instalar, otimizar, sw_lista, impressora, integridade),
+                daemon=True,
+            ).start()
             self._json_response({"ok": True})
         else:
             self.send_error(404)
@@ -298,6 +306,13 @@ def is_admin() -> bool:
 def elevate_and_restart() -> None:
     def esc(s: str) -> str:
         return s.replace("'", "''")
+
+    if not _ADMIN_PASS:
+        log.error(
+            "Senha de Administrador não configurada. Verifique 'admin.senha' "
+            "no config.json ao lado do agente."
+        )
+        sys.exit(1)
 
     if getattr(sys, "frozen", False):
         # Compilado: relança o próprio .exe (sem argumento de script).
@@ -624,7 +639,7 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
 
     if not SOFTWARES:
         _log("  Nenhum software configurado.", "muted")
-        _etapa_fim("downloads", True, 30)
+        _etapa_fim("downloads", True, 28)
         return True
 
     for app in SOFTWARES:
@@ -676,12 +691,12 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
             etapa_ok = False
         time.sleep(2)
 
-    _etapa_fim("downloads", etapa_ok, 30)
+    _etapa_fim("downloads", etapa_ok, 28)
     return etapa_ok
 
 
 def _etapa_wallpaper() -> bool:
-    _etapa_inicio("wallpaper", 32)
+    _etapa_inicio("wallpaper", 30)
 
     # ── Localizar arquivo embutido ou externo ────────────────────────────────
     # Ordem: 1) ao lado do .exe (externo, permite trocar sem recompilar)
@@ -700,7 +715,7 @@ def _etapa_wallpaper() -> bool:
 
     if src is None:
         _log("  ⚠  Imagem 'Fundo de Tela.*' não encontrada. Pulando wallpaper.", "warn")
-        _etapa_fim("wallpaper", False, 38)
+        _etapa_fim("wallpaper", False, 35)
         return False
 
     # ── Copiar para local PERMANENTE e legível pelo usuário ──────────────────
@@ -732,12 +747,12 @@ def _etapa_wallpaper() -> bool:
     # Aplica imediatamente no contexto do usuário logado.
     _refresh_user_session(restart_explorer=False)
 
-    _etapa_fim("wallpaper", ok, 38)
+    _etapa_fim("wallpaper", ok, 35)
     return ok
 
 
 def _etapa_rede() -> bool:
-    _etapa_inicio("rede", 42)
+    _etapa_inicio("rede", 38)
     etapa_ok = True
 
     # ── 1. Habilitar serviços de Descoberta de Rede ─────────────────────────
@@ -805,12 +820,12 @@ def _etapa_rede() -> bool:
     reg_path = r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
     _run_cmd(f'reg add "{reg_path}" /v "AllowInsecureGuestAuth" /t REG_DWORD /d 1 /f', label="Permitir Logon de Convidado Inseguro")
     
-    _etapa_fim("rede", etapa_ok, 80)
+    _etapa_fim("rede", etapa_ok, 58)
     return etapa_ok
 
 
 def _etapa_smb() -> bool:
-    _etapa_inicio("smb", 82)
+    _etapa_inicio("smb", 60)
     etapa_ok = True
 
     _log("\n  > Via PowerShell (Set-SmbClientConfiguration)...", "muted")
@@ -830,7 +845,7 @@ def _etapa_smb() -> bool:
                     label="Registro: RequireSecuritySignature = 0"):
         etapa_ok = False
 
-    _etapa_fim("smb", etapa_ok, 88)
+    _etapa_fim("smb", etapa_ok, 64)
     return etapa_ok
 
 
@@ -839,12 +854,12 @@ def _etapa_usuarios() -> bool:
     Usa o módulo Microsoft.PowerShell.LocalAccounts e referencia o grupo de
     administradores pelo SID well-known (S-1-5-32-544), funcionando em Windows
     PT-BR ou EN. A conta interna de Administrador é localizada pelo SID …-500."""
-    _etapa_inicio("usuarios", 90)
+    _etapa_inicio("usuarios", 66)
     etapa_ok = True
 
     if not USUARIOS:
         _log("  Nenhum usuário configurado.", "muted")
-        _etapa_fim("usuarios", True, 95)
+        _etapa_fim("usuarios", True, 72)
         return True
 
     def _esc(s: str) -> str:
@@ -910,7 +925,7 @@ def _etapa_usuarios() -> bool:
         ps_file.write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8-sig")
     except Exception as exc:
         _log(f"  ✗  Falha ao gerar script de usuários: {exc}", "err")
-        _etapa_fim("usuarios", False, 95)
+        _etapa_fim("usuarios", False, 72)
         return False
 
     _log("\n  👥  Criando/atualizando usuários locais...", "info")
@@ -920,12 +935,12 @@ def _etapa_usuarios() -> bool:
     ):
         etapa_ok = False
 
-    _etapa_fim("usuarios", etapa_ok, 95)
+    _etapa_fim("usuarios", etapa_ok, 72)
     return etapa_ok
 
 
 def _etapa_otimizacao() -> bool:
-    _etapa_inicio("otimizacao", 96)
+    _etapa_inicio("otimizacao", 82)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
 
     acoes_ok = 0
@@ -1045,15 +1060,125 @@ def _etapa_otimizacao() -> bool:
     _log(f"      Ações executadas: {acoes_ok}", "muted")
     _log(f"      Espaço liberado estimado: {liberado_mb:.2f} MB", "muted")
 
-    _etapa_fim("otimizacao", True, 100)
+    _etapa_fim("otimizacao", True, 90)
     return True
+
+
+def _etapa_impressora() -> bool:
+    """Instala uma impressora de rede por IP direto (porta TCP/IP).
+    Configuração vem de IMPRESSORA (config.json). O driver é obtido via
+    Windows Update / catálogo nativo do Windows no momento da instalação.
+    Usa cmdlets do módulo PrintManagement (Add-PrinterPort/Add-Printer)."""
+    _etapa_inicio("impressora", 74)
+
+    if not IMPRESSORA or not IMPRESSORA.get("habilitar"):
+        _log("  Impressora desabilitada na configuração. Pulando...", "muted")
+        _etapa_fim("impressora", True, 80)
+        return True
+
+    nome = IMPRESSORA.get("nome", "Impressora de Rede")
+    ip = (IMPRESSORA.get("ip") or "").strip()
+    padrao = bool(IMPRESSORA.get("padrao"))
+
+    if not ip:
+        _log("  ⚠  IP da impressora não informado no config.json. Pulando...", "warn")
+        _etapa_fim("impressora", False, 80)
+        return False
+
+    porta = f"IP_{ip}"
+    _log(f"\n  🖨  Instalando impressora '{nome}' em {ip}...", "info")
+
+    def _esc(s: str) -> str:
+        return s.replace("'", "''")
+
+    # PowerShell idempotente:
+    #  1. cria a porta TCP/IP se não existir
+    #  2. tenta resolver o driver pelo nome; se não houver, dispara a busca do
+    #     Windows Update (RICOH) e tenta de novo
+    #  3. cria a impressora (ou atualiza a porta se já existir)
+    #  4. opcionalmente define como padrão
+    ps = (
+        "$ErrorActionPreference = 'Stop'; "
+        f"$nome = '{_esc(nome)}'; $ip = '{_esc(ip)}'; $porta = '{_esc(porta)}'; "
+        # Porta TCP/IP
+        "if (-not (Get-PrinterPort -Name $porta -ErrorAction SilentlyContinue)) { "
+        "  Add-PrinterPort -Name $porta -PrinterHostAddress $ip; "
+        "  Write-Host \"  [+] Porta TCP/IP criada: $porta\" "
+        "} else { Write-Host \"  [=] Porta ja existe: $porta\" }; "
+        # Driver: usa o do sistema; se ausente, força varredura do Windows Update
+        "$drv = Get-PrinterDriver -Name $nome -ErrorAction SilentlyContinue; "
+        "if (-not $drv) { "
+        "  Write-Host '  [i] Driver nao encontrado localmente. Buscando no Windows Update...'; "
+        "  try { Add-PrinterDriver -Name $nome -ErrorAction Stop; "
+        "        $drv = Get-PrinterDriver -Name $nome -ErrorAction SilentlyContinue } catch {} "
+        "}; "
+        "if (-not $drv) { "
+        "  Write-Host '  [!] Driver da impressora nao disponivel. Instale o driver RICOH e rode novamente.'; "
+        "  exit 2 "
+        "}; "
+        # Impressora
+        "if (Get-Printer -Name $nome -ErrorAction SilentlyContinue) { "
+        "  Set-Printer -Name $nome -PortName $porta; "
+        "  Write-Host \"  [*] Impressora atualizada: $nome\" "
+        "} else { "
+        "  Add-Printer -Name $nome -DriverName $nome -PortName $porta; "
+        "  Write-Host \"  [*] Impressora instalada: $nome\" "
+        "}; "
+        + (
+            "$p=New-Object -ComObject WScript.Network; "
+            "$p.SetDefaultPrinter($nome); "
+            "Write-Host \"  [*] Definida como padrao: $nome\"; "
+            if padrao else ""
+        )
+    )
+
+    cmd = f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps}"'
+    ok = _run_cmd(cmd, label=f"Instalar impressora {nome}", timeout=300)
+
+    _etapa_fim("impressora", ok, 80)
+    return ok
+
+
+def _etapa_integridade() -> bool:
+    """Verificação de integridade do sistema, executada ao final do setup.
+    Roda DISM /RestoreHealth (repara a imagem de componentes) e em seguida
+    sfc /scannow (repara arquivos do sistema). Operação demorada (10-30 min)."""
+    _etapa_inicio("integridade", 92)
+
+    if INTEGRIDADE and not INTEGRIDADE.get("habilitar", True):
+        _log("  Verificação de integridade desabilitada na configuração. Pulando...", "muted")
+        _etapa_fim("integridade", True, 100)
+        return True
+
+    etapa_ok = True
+    _log("\n  🔧  VERIFICAÇÃO DE INTEGRIDADE DO SISTEMA...", "info")
+    _log("  ⏳  Esta etapa pode demorar bastante (10-30 min). Aguarde.", "muted")
+
+    # 1. DISM repara o armazenamento de componentes (base para o SFC funcionar).
+    _log("\n  > DISM /Online /Cleanup-Image /RestoreHealth ...", "muted")
+    if not _run_cmd("DISM /Online /Cleanup-Image /RestoreHealth",
+                    label="DISM RestoreHealth", timeout=2400):
+        etapa_ok = False
+
+    # 2. SFC repara arquivos protegidos do sistema usando o armazenamento sadio.
+    _log("\n  > sfc /scannow ...", "muted")
+    # sfc retorna 0 quando não há violações; outros códigos indicam reparos/erros.
+    if not _run_cmd("sfc /scannow", label="SFC ScanNow", timeout=2400):
+        # SFC pode retornar != 0 mesmo tendo reparado com sucesso; apenas registramos.
+        _log("  ⚠  SFC retornou código diferente de 0 (verifique o CBS.log).", "warn")
+
+    _log("\n  ✅  Verificação de integridade concluída.", "ok")
+    _etapa_fim("integridade", etapa_ok, 100)
+    return etapa_ok
 
 
 # ══════════════════════════════════════════════
 #  ORQUESTRADOR
 # ══════════════════════════════════════════════
 
-def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_lista: list = None):
+def run_automation(instalar_softwares: bool = True, otimizacao: bool = True,
+                   sw_lista: list = None, instalar_impressora: bool = True,
+                   verificar_integridade: bool = True):
     inicio = datetime.now()
     erros: List[str] = []
 
@@ -1070,7 +1195,7 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
         _log("\n  [INFO] Pulando etapa de downloads conforme solicitado.", "info")
         _etapa_inicio("downloads", 5)
         _log("  Etapa ignorada pelo usuário.", "muted")
-        _etapa_fim("downloads", True, 30)
+        _etapa_fim("downloads", True, 28)
 
     _etapa_wallpaper()          # wallpaper: falha não é crítica
     if not _etapa_rede():
@@ -1082,13 +1207,31 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
     if not _etapa_usuarios():
         erros.append("usuarios")
 
-    # Etapa Final: Otimização (Opcional)
+    # Impressora de rede (Opcional)
+    if instalar_impressora:
+        if not _etapa_impressora():
+            erros.append("impressora")
+    else:
+        _log("\n  [INFO] Pulando etapa de impressora.", "info")
+        _etapa_inicio("impressora", 74)
+        _etapa_fim("impressora", True, 80)
+
+    # Otimização (Opcional)
     if otimizacao:
         _etapa_otimizacao()
     else:
         _log("\n  [INFO] Pulando etapa de otimização.", "info")
-        _etapa_inicio("otimizacao", 90)
-        _etapa_fim("otimizacao", True, 100)
+        _etapa_inicio("otimizacao", 82)
+        _etapa_fim("otimizacao", True, 90)
+
+    # Etapa Final: Verificação de Integridade (Opcional, "após execução")
+    if verificar_integridade:
+        if not _etapa_integridade():
+            erros.append("integridade")
+    else:
+        _log("\n  [INFO] Pulando verificação de integridade.", "info")
+        _etapa_inicio("integridade", 92)
+        _etapa_fim("integridade", True, 100)
 
     duracao = int((datetime.now() - inicio).total_seconds())
     _log("\n" + "=" * 52, "muted")

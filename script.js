@@ -3,7 +3,7 @@
 //  SSE + fetch — puro JavaScript, sem dependências
 // ============================================
 
-const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'usuarios', 'otimizacao'];
+const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'usuarios', 'impressora', 'otimizacao', 'integridade'];
 let _eventSource = null;
 let _swTotal = 5;   // AnyDesk + Chrome + Adobe + Office + WinRAR
 let _swDone  = 0;
@@ -206,10 +206,12 @@ function iniciarAgente() {
     fetch('/api/execute', { 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         instalar_softwares: document.getElementById('chkSoftwares').checked,
         softwares_selecionados: selectedSW,
-        otimizacao: document.getElementById('chkOtimizacao').checked
+        otimizacao: document.getElementById('chkOtimizacao').checked,
+        instalar_impressora: document.getElementById('chkImpressora').checked,
+        verificar_integridade: document.getElementById('chkIntegridade').checked
       })
     })
       .catch(() => appendLog('[!] Falha ao contactar o servidor Python.', 'err'));
@@ -293,4 +295,14 @@ document.getElementById('chkOtimizacao').addEventListener('change', (e) => {
   } else {
     step.style.opacity = '0.4';
   }
+});
+
+document.getElementById('chkImpressora').addEventListener('change', (e) => {
+  const step = document.getElementById('step-impressora');
+  step.style.opacity = e.target.checked ? '1' : '0.4';
+});
+
+document.getElementById('chkIntegridade').addEventListener('change', (e) => {
+  const step = document.getElementById('step-integridade');
+  step.style.opacity = e.target.checked ? '1' : '0.4';
 });
