@@ -1003,18 +1003,46 @@ def _etapa_otimizacao() -> bool:
     bgapps     = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications"
     storage    = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\StorageSense\\Parameters\\StoragePolicy"
     winmetrics = f"{base}\\Control Panel\\Desktop\\WindowMetrics"
+    desktop    = f"{base}\\Control Panel\\Desktop"
+    visualfx   = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects"
 
     _log("  > Aplicando ajustes visuais e de barra de tarefas no usuário logado...", "muted")
-    # Animações de janela desativadas (preserva sombras/seleção)
-    _run_cmd(f'reg add "{winmetrics}" /v MinAnimate /t REG_SZ /d 0 /f', label="Sem animações de janela")
-    # Transparência desativada
-    _run_cmd(f'reg add "{themes}" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Sem transparência")
-    # Modo escuro (sistema + apps)
+
+    # ── Acessibilidade > Efeitos Visuais: EFEITOS DE TRANSPARÊNCIA = OFF ──────
+    _run_cmd(f'reg add "{themes}" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Efeitos de transparência: OFF")
+
+    # ── Acessibilidade > Efeitos Visuais: EFEITOS DE ANIMAÇÃO = OFF ───────────
+    # Máxima eficiência: replica "Ajustar para melhor desempenho" do Windows.
+    #   • VisualFXSetting=2  → master "melhor desempenho"
+    #   • UserPreferencesMask 9012038010000000 → desliga fades/animações de
+    #     menus, controles, listas etc. (é o que o Windows grava nesse modo)
+    #   • MinAnimate=0       → animação de minimizar/maximizar janela
+    #   • TaskbarAnimations=0→ animações da barra de tarefas
+    #   • DragFullWindows=0  → não desenhar conteúdo da janela ao arrastar
+    #   • ListviewAlphaSelect / ListviewShadow=0 → seleção translúcida e sombras
+    _run_cmd(f'reg add "{visualfx}" /v VisualFXSetting /t REG_DWORD /d 2 /f', label="Efeitos visuais: melhor desempenho")
+    _run_cmd(f'reg add "{desktop}" /v UserPreferencesMask /t REG_BINARY /d 9012038010000000 /f', label="Efeitos de animação: OFF (máscara)")
+    _run_cmd(f'reg add "{winmetrics}" /v MinAnimate /t REG_SZ /d 0 /f', label="Animação de janela: OFF")
+    _run_cmd(f'reg add "{advanced}" /v TaskbarAnimations /t REG_DWORD /d 0 /f', label="Animações da barra de tarefas: OFF")
+    _run_cmd(f'reg add "{desktop}" /v DragFullWindows /t REG_SZ /d 0 /f', label="Conteúdo ao arrastar: OFF")
+    _run_cmd(f'reg add "{advanced}" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f', label="Seleção translúcida: OFF")
+    _run_cmd(f'reg add "{advanced}" /v ListviewShadow /t REG_DWORD /d 0 /f', label="Sombras de ícones: OFF")
+
+    # ── Modo escuro (sistema + apps) ─────────────────────────────────────────
     _run_cmd(f'reg add "{themes}" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f', label="Modo escuro (sistema)")
     _run_cmd(f'reg add "{themes}" /v AppsUseLightTheme /t REG_DWORD /d 0 /f', label="Modo escuro (apps)")
-    # Barra de tarefas: ocultar pesquisa e botão de Visão de Tarefas
-    _run_cmd(f'reg add "{search}" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Ocultar caixa de pesquisa")
-    _run_cmd(f'reg add "{advanced}" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Desativar Visão de Tarefas")
+
+    # ── Personalização > Barra de Tarefas ────────────────────────────────────
+    #   • SearchboxTaskbarMode=0 → SEMPRE ocultar a Pesquisa
+    #   • ShowTaskViewButton=0   → ocultar Visão de Tarefas
+    #   • TaskbarDa=0            → ocultar Widgets (por usuário)
+    #   • Dsh\AllowNewsAndInterests=0 → desativa Widgets a nível de máquina (reforço)
+    _run_cmd(f'reg add "{search}" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Pesquisa na barra: SEMPRE oculta")
+    _run_cmd(f'reg add "{advanced}" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Visão de Tarefas: OFF")
+    _run_cmd(f'reg add "{advanced}" /v TaskbarDa /t REG_DWORD /d 0 /f', label="Widgets: OFF (usuário)")
+    _run_cmd(r'reg add "HKLM\SOFTWARE\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f', label="Widgets: OFF (máquina)")
+
+    # ── Outros ───────────────────────────────────────────────────────────────
     # Mostrar PERCENTUAL DA BATERIA na barra de tarefas (notebooks)
     _run_cmd(f'reg add "{advanced}" /v IsBatteryPercentageEnabled /t REG_DWORD /d 1 /f', label="Mostrar % da bateria")
     # Apps em segundo plano desativados
