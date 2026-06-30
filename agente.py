@@ -966,6 +966,74 @@ def _etapa_usuarios() -> bool:
     return etapa_ok
 
 
+# Apps "inúteis" pré-instalados removidos na otimização. Lista CURADA: só
+# bloatware (jogos, Xbox, Bing, Skype etc.). Nada essencial (Loja, Calculadora,
+# Fotos, Terminal, Paint, Notepad, Recorte, Câmera) entra aqui.
+# Padrões aceitam curinga (*) — ex.: 'Microsoft.Xbox*' cobre toda a família Xbox.
+_BLOATWARE: List[str] = [
+    "Microsoft.Xbox*",                      # Xbox (app, overlays, identity, TCUI…)
+    "Microsoft.GamingApp",                  # Xbox / Game Bar (novo)
+    "Microsoft.ZuneMusic",                  # Groove Música
+    "Microsoft.ZuneVideo",                  # Filmes e TV
+    "Microsoft.BingNews",                   # Notícias
+    "Microsoft.BingWeather",                # Clima
+    "Microsoft.MicrosoftSolitaireCollection",  # Coleção Solitaire
+    "Microsoft.People",                     # Pessoas
+    "Microsoft.WindowsFeedbackHub",         # Hub de Comentários
+    "Microsoft.GetHelp",                    # Obter Ajuda
+    "Microsoft.Getstarted",                 # Dicas
+    "Microsoft.Microsoft3DViewer",          # Visualizador 3D
+    "Microsoft.MixedReality.Portal",        # Realidade Mista
+    "Microsoft.SkypeApp",                   # Skype
+    "Microsoft.WindowsMaps",                # Mapas
+    "Microsoft.MicrosoftOfficeHub",         # "Obter Office" / Office Hub
+    "Clipchamp.Clipchamp",                  # Clipchamp
+    "Microsoft.PowerAutomateDesktop",       # Power Automate
+    "MicrosoftTeams",                       # Teams pessoal (não o do Office 365)
+]
+
+
+def _remover_bloatware() -> None:
+    """Remove apps inúteis pré-instalados para TODOS os usuários e os
+    'deprovisiona' (para não voltarem em novos perfis/usuários). Best-effort:
+    apps que o Windows protege simplesmente falham e são ignorados."""
+    _log("  > Removendo aplicativos inúteis (bloatware)...", "muted")
+
+    apps_ps = ",".join(f"'{a}'" for a in _BLOATWARE)
+    linhas = [
+        "$ErrorActionPreference = 'SilentlyContinue'",
+        f"$apps = @({apps_ps})",
+        "foreach ($a in $apps) {",
+        "  Get-AppxPackage -AllUsers -Name $a | ForEach-Object {",
+        "    try {",
+        "      Remove-AppxPackage -Package $_.PackageFullName -AllUsers -ErrorAction Stop",
+        "      Write-Host \"  [-] Removido: $($_.Name)\"",
+        "    } catch { Write-Host \"  [=] Mantido (protegido): $($_.Name)\" }",
+        "  }",
+        "  Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like $a } | ForEach-Object {",
+        "    try {",
+        "      Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction Stop | Out-Null",
+        "      Write-Host \"  [-] Deprovisionado: $($_.DisplayName)\"",
+        "    } catch {}",
+        "  }",
+        "}",
+    ]
+
+    script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    ps_file = script_dir / "remover_bloatware.ps1"
+    try:
+        ps_file.write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8-sig")
+    except Exception as exc:
+        _log(f"  ⚠  Falha ao gerar script de remoção: {exc}", "warn")
+        return
+
+    _run_cmd(
+        f'powershell -NoProfile -ExecutionPolicy Bypass -File "{ps_file}"',
+        label="Remover bloatware (todos os usuários)", timeout=600,
+    )
+
+
 def _etapa_otimizacao() -> bool:
     _etapa_inicio("otimizacao", 82)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
@@ -1100,7 +1168,11 @@ def _etapa_otimizacao() -> bool:
     _run_cmd("net start wuauserv", label="Reiniciar Windows Update", timeout=15)
     acoes_ok += 1
 
-    # ── 6. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
+    # ── 6. Remoção de bloatware (apps inúteis pré-instalados) ─────────────────
+    _remover_bloatware()
+    acoes_ok += 1
+
+    # ── 7. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
     _log("  > Aplicando alterações e reiniciando o Explorer no usuário logado...", "muted")
     _refresh_user_session(restart_explorer=True, clear_recycle=True)
     acoes_ok += 1
