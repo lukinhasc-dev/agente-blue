@@ -56,17 +56,27 @@ _EXE_DIR = _BASE_DIR / ".exe"
 #    Procura nesta ordem: ao lado do .exe → base → cópia embutida (_MEIPASS).
 # ─────────────────────────────────────────────
 
+def _boot_print(msg: str) -> None:
+    # Antes do logging estar pronto. Sem console (app windowed) sys.stdout é
+    # None — nesse caso, silencia para não quebrar o app.
+    if sys.stdout is not None:
+        try:
+            print(msg)
+        except Exception:
+            pass
+
+
 def _load_config() -> dict:
     for cand in (_BASE_DIR / "config.json", _BUNDLE_DIR / "config.json"):
         if cand.exists():
             try:
                 with open(cand, "r", encoding="utf-8-sig") as fh:
                     cfg = json.load(fh)
-                print(f"[config] Carregado de: {cand}")
+                _boot_print(f"[config] Carregado de: {cand}")
                 return cfg
             except Exception as exc:
-                print(f"[config] Falha ao ler {cand}: {exc}")
-    print("[config] config.json não encontrado — usando valores padrão internos.")
+                _boot_print(f"[config] Falha ao ler {cand}: {exc}")
+    _boot_print("[config] config.json não encontrado — usando valores padrão internos.")
     return {}
 
 
@@ -107,16 +117,26 @@ _WALLPAPER_NAMES = [
 ]
 
 # ─────────────────────────────────────────────
+#  SUPRESSÃO DE JANELAS DE CONSOLE
+#  CREATE_NO_WINDOW evita que cmd/powershell/schtasks/instaladores piscem
+#  janelas de console quando o agente roda como app sem console (GUI).
+# ─────────────────────────────────────────────
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+# ─────────────────────────────────────────────
 #  LOG
 # ─────────────────────────────────────────────
+# Quando compilado SEM console (windowed), sys.stdout é None — nesse caso só
+# registramos em arquivo; com console, também ecoa no terminal.
+_log_handlers: list = [logging.FileHandler(_LOG_FILE, encoding="utf-8")]
+if sys.stdout is not None:
+    _log_handlers.insert(0, logging.StreamHandler(sys.stdout))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
-    ],
+    handlers=_log_handlers,
 )
 log = logging.getLogger("agente-blue")
 
@@ -329,10 +349,11 @@ def elevate_and_restart() -> None:
         f"$cred = New-Object System.Management.Automation.PSCredential('{esc(_ADMIN_USER)}', $pass); "
         f"Start-Process '{esc(target)}' "
         f"{arglist}"
-        f"-Credential $cred -Wait -WindowStyle Normal"
+        f"-Credential $cred -Wait -WindowStyle Hidden"
     )
     log.info("Elevando privilégios para Administrador...")
-    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], check=False)
+    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                   check=False, creationflags=_NO_WINDOW)
     sys.exit(0)
 
 
@@ -355,6 +376,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
             result = subprocess.run(
                 cmd, shell=True, stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+                creationflags=_NO_WINDOW,
             )
             stdout_txt, stderr_txt = "", ""
         else:
@@ -362,6 +384,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
                 cmd, shell=True, capture_output=True,
                 stdin=subprocess.DEVNULL,      # evita travamento: sem stdin = sem espera por input
                 text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                creationflags=_NO_WINDOW,
             )
             stdout_txt, stderr_txt = result.stdout or "", result.stderr or ""
         for line in stdout_txt.strip().splitlines():
@@ -420,6 +443,7 @@ def _logged_user() -> Optional[dict]:
         r = subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            creationflags=_NO_WINDOW,
         )
         out = (r.stdout or "").strip()
         if out:
@@ -450,7 +474,7 @@ def _run_as_logged_user(cmd_path: str, label: str = "") -> bool:
         return _run_cmd(f'"{cmd_path}"', label=label or "Executar script (contexto atual)")
 
     task = "AgenteBlue_UserApply"
-    subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True)
+    subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True, creationflags=_NO_WINDOW)
     create = (
         f'schtasks /create /tn {task} /tr "{cmd_path}" /sc once /st 23:59 '
         f'/ru "{info["user"]}" /it /rl limited /f'
@@ -459,7 +483,7 @@ def _run_as_logged_user(cmd_path: str, label: str = "") -> bool:
     if ok:
         _run_cmd(f'schtasks /run /tn {task}', label=f"{label} (executar)")
         time.sleep(4)
-        subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True)
+        subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True, creationflags=_NO_WINDOW)
     return ok
 
 
@@ -1169,7 +1193,7 @@ def _etapa_otimizacao() -> bool:
             f'for /d %x in ("{folder}\\*") do @rd /s /q "%x" >nul 2>&1',
         ):
             try:
-                subprocess.run(c, shell=True, capture_output=True, timeout=120)
+                subprocess.run(c, shell=True, capture_output=True, timeout=120, creationflags=_NO_WINDOW)
             except subprocess.TimeoutExpired:
                 _log(f"  ⚠  Limpeza demorou demais em {folder} (arquivos em uso).", "warn")
 

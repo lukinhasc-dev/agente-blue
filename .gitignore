@@ -45,7 +45,6 @@ venv.bak/
 .idea/
 
 # Agent Blue Specific
-bluepay.ico
 Fundo de Tela.jpg
 
 # Configuração com segredos (senhas) — NÃO versionar.
