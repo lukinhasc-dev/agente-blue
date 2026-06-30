@@ -55,3 +55,6 @@ config.json
 # Mantenha-os na pasta .exe local; o build os embute a partir dela.
 .exe/GoogleDriveSetup.exe
 .exe/SlackSetup.exe
+
+# Build output (exe grande, distribuido fora do GitHub)
+dist/
