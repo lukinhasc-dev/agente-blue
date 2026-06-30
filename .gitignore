@@ -45,5 +45,16 @@ venv.bak/
 .idea/
 
 # Agent Blue Specific
-bluepay.ico
 Fundo de Tela.jpg
+
+# Configuração com segredos (senhas) — NÃO versionar.
+# Use config.example.json como modelo e crie seu config.json local.
+config.json
+
+# Instaladores grandes (>100 MB) — passam do limite do GitHub.
+# Mantenha-os na pasta .exe local; o build os embute a partir dela.
+.exe/GoogleDriveSetup.exe
+.exe/SlackSetup.exe
+
+# Build output (exe grande, distribuido fora do GitHub)
+dist/

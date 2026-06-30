@@ -36,24 +36,6 @@ from pathlib import Path
 from typing import Optional, List
 
 # ─────────────────────────────────────────────
-#  CREDENCIAIS DE ADMINISTRADOR
-# ─────────────────────────────────────────────
-_ADMIN_USER: str = r".\Administrator"
-_ADMIN_PASS: str = "Sham23*"
-
-# ─────────────────────────────────────────────
-#  USUÁRIOS LOCAIS (sempre criados/atualizados)
-#    admin=True         → adiciona ao grupo Administradores (SID S-1-5-32-544)
-#    builtin_admin=True → alvo é a conta INTERNA de Administrador (SID …-500),
-#                         detectada pelo SID e não pelo nome (independe do idioma).
-#                         Se ela não existir, cria uma com o nome informado.
-# ─────────────────────────────────────────────
-USUARIOS: List[dict] = [
-    {"nome": "Suporte",       "senha": "Conectiva@2020", "admin": True, "builtin_admin": False},
-    {"nome": "Administrador", "senha": "Sham23*",        "admin": True, "builtin_admin": True},
-]
-
-# ─────────────────────────────────────────────
 #  CAMINHOS
 # ─────────────────────────────────────────────
 if getattr(sys, "frozen", False):
@@ -66,7 +48,74 @@ else:
 # Pasta com instaladores locais (Chrome, Adobe, WinRAR, Office)
 _EXE_DIR = _BASE_DIR / ".exe"
 
-_LOG_FILE = Path(os.environ.get("TEMP", "C:\\Temp")) / "agente_blue.log"
+# ─────────────────────────────────────────────
+#  CONFIGURAÇÃO EXTERNA (config.json)
+#    Credenciais, usuários, softwares e impressora ficam fora do código-fonte
+#    (e fora do .exe), num config.json editável ao lado do agente. Assim o
+#    técnico ajusta tudo sem recompilar e nada sensível fica embutido no binário.
+#    Procura nesta ordem: ao lado do .exe → base → cópia embutida (_MEIPASS).
+# ─────────────────────────────────────────────
+
+def _boot_print(msg: str) -> None:
+    # Antes do logging estar pronto. Sem console (app windowed) sys.stdout é
+    # None — nesse caso, silencia para não quebrar o app.
+    if sys.stdout is not None:
+        try:
+            print(msg)
+        except Exception:
+            pass
+
+
+def _load_config() -> dict:
+    for cand in (_BASE_DIR / "config.json", _BUNDLE_DIR / "config.json"):
+        if cand.exists():
+            try:
+                with open(cand, "r", encoding="utf-8-sig") as fh:
+                    cfg = json.load(fh)
+                _boot_print(f"[config] Carregado de: {cand}")
+                return cfg
+            except Exception as exc:
+                _boot_print(f"[config] Falha ao ler {cand}: {exc}")
+    _boot_print("[config] config.json não encontrado — usando valores padrão internos.")
+    return {}
+
+
+_CONFIG: dict = _load_config()
+
+# ─────────────────────────────────────────────
+#  CREDENCIAIS DE ADMINISTRADOR (de config.json)
+# ─────────────────────────────────────────────
+_admin_cfg: dict = _CONFIG.get("admin", {})
+_ADMIN_USER: str = _admin_cfg.get("usuario", r".\Administrator")
+_ADMIN_PASS: str = _admin_cfg.get("senha", "")
+
+# ─────────────────────────────────────────────
+#  USUÁRIOS LOCAIS (sempre criados/atualizados) — de config.json
+#    admin=True         → adiciona ao grupo Administradores (SID S-1-5-32-544)
+#    builtin_admin=True → alvo é a conta INTERNA de Administrador (SID …-500),
+#                         detectada pelo SID e não pelo nome (independe do idioma).
+#                         Se ela não existir, cria uma com o nome informado.
+# ─────────────────────────────────────────────
+USUARIOS: List[dict] = _CONFIG.get("usuarios", [])
+
+# ─────────────────────────────────────────────
+#  IMPRESSORA DE REDE (de config.json)
+# ─────────────────────────────────────────────
+IMPRESSORA: dict = _CONFIG.get("impressora", {})
+
+# ─────────────────────────────────────────────
+#  VERIFICAÇÃO DE INTEGRIDADE (de config.json)
+# ─────────────────────────────────────────────
+INTEGRIDADE: dict = _CONFIG.get("integridade", {"habilitar": True})
+
+# Log em local FIXO e legível por qualquer usuário (não depende do %TEMP% do
+# Administrador, que muda ao elevar). Facilita o diagnóstico.
+try:
+    _LOG_DIR = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _LOG_DIR = Path(os.environ.get("TEMP", r"C:\Temp"))
+_LOG_FILE = _LOG_DIR / "agente_blue.log"
 
 # Wallpaper: procura o arquivo "Fundo de Tela.*" na raiz do executável / script
 _WALLPAPER_NAMES = [
@@ -75,16 +124,26 @@ _WALLPAPER_NAMES = [
 ]
 
 # ─────────────────────────────────────────────
+#  SUPRESSÃO DE JANELAS DE CONSOLE
+#  CREATE_NO_WINDOW evita que cmd/powershell/schtasks/instaladores piscem
+#  janelas de console quando o agente roda como app sem console (GUI).
+# ─────────────────────────────────────────────
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+# ─────────────────────────────────────────────
 #  LOG
 # ─────────────────────────────────────────────
+# Quando compilado SEM console (windowed), sys.stdout é None — nesse caso só
+# registramos em arquivo; com console, também ecoa no terminal.
+_log_handlers: list = [logging.FileHandler(_LOG_FILE, encoding="utf-8")]
+if sys.stdout is not None:
+    _log_handlers.insert(0, logging.StreamHandler(sys.stdout))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
-    ],
+    handlers=_log_handlers,
 )
 log = logging.getLogger("agente-blue")
 
@@ -98,49 +157,19 @@ log = logging.getLogger("agente-blue")
 #  detect   : caminho que indica instalação já existente (pula)
 #  ok_codes : códigos de saída tratados como sucesso (padrão {0})
 # ─────────────────────────────────────────────
-SOFTWARES: List[dict] = [
-    {
-        "nome": "AnyDesk",
-        "metodo": "local",
-        "filename": "Anydesk.exe",
-        "args": '--install "C:\\Program Files (x86)\\AnyDesk" --silent --start-with-win --create-shortcuts --create-desktop-icon',
-        "ok_codes": {0, 11},
-        "detect": r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
-        "firewall": True,
-    },
-    {
-        "nome": "Google Chrome",
-        "metodo": "local",
-        "filename": "ChromeSetup.exe",
-        "args": "/silent /install",
-        "ok_codes": {0, 3010},
-        "detect": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    },
-    {
-        "nome": "Adobe Acrobat Reader",
-        "metodo": "local",
-        "filename": "Reader_br_install.exe",
-        "args": "",
-        "ok_codes": {0, 3010},
-        "detect": r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
-    },
-    {
-        "nome": "Microsoft 365",
-        "metodo": "local",
-        "filename": "OfficeSetup.exe",
-        "args": "",
-        "ok_codes": {0},
-        "detect": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
-    },
-    {
-        "nome": "WinRAR",
-        "metodo": "local",
-        "filename": "winrar-x64-722br.exe",
-        "args": "/s",
-        "ok_codes": {0},
-        "detect": r"C:\Program Files\WinRAR\WinRAR.exe",
-    },
-]
+def _normalizar_softwares(lista: List[dict]) -> List[dict]:
+    """Converte os softwares do config.json para o formato interno.
+    ok_codes vem como lista JSON ([0, 3010]) e precisa virar set ({0, 3010})."""
+    out: List[dict] = []
+    for app in lista:
+        app = dict(app)  # cópia rasa para não mutar o config original
+        codes = app.get("ok_codes", [0])
+        app["ok_codes"] = set(codes) if isinstance(codes, (list, set, tuple)) else {0}
+        out.append(app)
+    return out
+
+
+SOFTWARES: List[dict] = _normalizar_softwares(_CONFIG.get("softwares", []))
 
 # ─────────────────────────────────────────────
 #  FILA SSE
@@ -202,8 +231,14 @@ class AgenteHandler(http.server.SimpleHTTPRequestHandler):
             instalar = params.get("instalar_softwares", True)
             otimizar = params.get("otimizacao", True)
             sw_lista = params.get("softwares_selecionados", [])
-            
-            threading.Thread(target=run_automation, args=(instalar, otimizar, sw_lista), daemon=True).start()
+            impressora = params.get("instalar_impressora", True)
+            integridade = params.get("verificar_integridade", True)
+
+            threading.Thread(
+                target=run_automation,
+                args=(instalar, otimizar, sw_lista, impressora, integridade),
+                daemon=True,
+            ).start()
             self._json_response({"ok": True})
         else:
             self.send_error(404)
@@ -299,6 +334,13 @@ def elevate_and_restart() -> None:
     def esc(s: str) -> str:
         return s.replace("'", "''")
 
+    if not _ADMIN_PASS:
+        log.error(
+            "Senha de Administrador não configurada. Verifique 'admin.senha' "
+            "no config.json ao lado do agente."
+        )
+        sys.exit(1)
+
     if getattr(sys, "frozen", False):
         # Compilado: relança o próprio .exe (sem argumento de script).
         target = sys.executable
@@ -314,10 +356,11 @@ def elevate_and_restart() -> None:
         f"$cred = New-Object System.Management.Automation.PSCredential('{esc(_ADMIN_USER)}', $pass); "
         f"Start-Process '{esc(target)}' "
         f"{arglist}"
-        f"-Credential $cred -Wait -WindowStyle Normal"
+        f"-Credential $cred -Wait -WindowStyle Hidden"
     )
     log.info("Elevando privilégios para Administrador...")
-    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], check=False)
+    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                   check=False, creationflags=_NO_WINDOW)
     sys.exit(0)
 
 
@@ -340,6 +383,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
             result = subprocess.run(
                 cmd, shell=True, stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+                creationflags=_NO_WINDOW,
             )
             stdout_txt, stderr_txt = "", ""
         else:
@@ -347,6 +391,7 @@ def _run_cmd(cmd: str, label: str = "", timeout: int = 300,
                 cmd, shell=True, capture_output=True,
                 stdin=subprocess.DEVNULL,      # evita travamento: sem stdin = sem espera por input
                 text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                creationflags=_NO_WINDOW,
             )
             stdout_txt, stderr_txt = result.stdout or "", result.stderr or ""
         for line in stdout_txt.strip().splitlines():
@@ -405,6 +450,7 @@ def _logged_user() -> Optional[dict]:
         r = subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            creationflags=_NO_WINDOW,
         )
         out = (r.stdout or "").strip()
         if out:
@@ -435,7 +481,7 @@ def _run_as_logged_user(cmd_path: str, label: str = "") -> bool:
         return _run_cmd(f'"{cmd_path}"', label=label or "Executar script (contexto atual)")
 
     task = "AgenteBlue_UserApply"
-    subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True)
+    subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True, creationflags=_NO_WINDOW)
     create = (
         f'schtasks /create /tn {task} /tr "{cmd_path}" /sc once /st 23:59 '
         f'/ru "{info["user"]}" /it /rl limited /f'
@@ -444,7 +490,7 @@ def _run_as_logged_user(cmd_path: str, label: str = "") -> bool:
     if ok:
         _run_cmd(f'schtasks /run /tn {task}', label=f"{label} (executar)")
         time.sleep(4)
-        subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True)
+        subprocess.run(f'schtasks /delete /tn {task} /f', shell=True, capture_output=True, creationflags=_NO_WINDOW)
     return ok
 
 
@@ -591,6 +637,7 @@ def _instalar_via_local(app: dict) -> bool:
       2. cópia embutida no próprio .exe       (_MEIPASS/.exe — build onefile autossuficiente)"""
     nome = app["nome"]
     filename = app["filename"]
+    user_ctx = bool(app.get("user_context"))
 
     candidatos = [
         _EXE_DIR / filename,                 # externo (ao lado do .exe)
@@ -609,7 +656,33 @@ def _instalar_via_local(app: dict) -> bool:
     ok_codes = app.get("ok_codes", {0})
     args = app.get("args", "")
 
-    if app.get("msi"):
+    # App por-usuário (ex.: Slack/Squirrel instala em %LocalAppData%): copia o
+    # instalador para ProgramData (legível pelo usuário limitado) e roda no
+    # contexto do usuário logado — senão cairia no perfil do Administrador.
+    if user_ctx and _logged_user():
+        script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        destino = script_dir / filename
+        try:
+            if not destino.exists() or destino.stat().st_size != arquivo.stat().st_size:
+                shutil.copy2(arquivo, destino)
+            cmd = f'"{destino}" {args}'.rstrip()
+            cmd_file = script_dir / "install_user_app.cmd"
+            cmd_file.write_text("@echo off\r\n" + cmd + "\r\n", encoding="ascii")
+        except Exception as exc:
+            _log(f"  ⚠  Falha ao preparar instalação no usuário: {exc}", "warn")
+            return False
+        return _run_as_logged_user(str(cmd_file), label=f"Instalando {nome} (usuário logado)")
+
+    suf = arquivo.suffix.lower()
+    if suf in (".msix", ".msixbundle", ".appx", ".appxbundle"):
+        # Pacote MSIX/Appx: não roda como .exe. Provisiona para TODOS os usuários
+        # (contexto de Administrador, sem tarefa de usuário). Pacotes provisionados
+        # são instalados para cada usuário no próximo logon — ideal para máquinas
+        # recém-preparadas, em que os usuários novos recebem o app ao entrar.
+        ps = f"Add-AppxProvisionedPackage -Online -PackagePath '{arquivo}' -SkipLicense"
+        cmd = f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps}"'
+    elif app.get("msi"):
         cmd = f'msiexec /i "{arquivo}" {args}'
     else:
         cmd = f'"{arquivo}" {args}'.rstrip()
@@ -624,7 +697,7 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
 
     if not SOFTWARES:
         _log("  Nenhum software configurado.", "muted")
-        _etapa_fim("downloads", True, 30)
+        _etapa_fim("downloads", True, 28)
         return True
 
     for app in SOFTWARES:
@@ -676,12 +749,12 @@ def _etapa_downloads(sw_lista: list = None) -> bool:
             etapa_ok = False
         time.sleep(2)
 
-    _etapa_fim("downloads", etapa_ok, 30)
+    _etapa_fim("downloads", etapa_ok, 28)
     return etapa_ok
 
 
 def _etapa_wallpaper() -> bool:
-    _etapa_inicio("wallpaper", 32)
+    _etapa_inicio("wallpaper", 30)
 
     # ── Localizar arquivo embutido ou externo ────────────────────────────────
     # Ordem: 1) ao lado do .exe (externo, permite trocar sem recompilar)
@@ -700,7 +773,7 @@ def _etapa_wallpaper() -> bool:
 
     if src is None:
         _log("  ⚠  Imagem 'Fundo de Tela.*' não encontrada. Pulando wallpaper.", "warn")
-        _etapa_fim("wallpaper", False, 38)
+        _etapa_fim("wallpaper", False, 35)
         return False
 
     # ── Copiar para local PERMANENTE e legível pelo usuário ──────────────────
@@ -732,12 +805,12 @@ def _etapa_wallpaper() -> bool:
     # Aplica imediatamente no contexto do usuário logado.
     _refresh_user_session(restart_explorer=False)
 
-    _etapa_fim("wallpaper", ok, 38)
+    _etapa_fim("wallpaper", ok, 35)
     return ok
 
 
 def _etapa_rede() -> bool:
-    _etapa_inicio("rede", 42)
+    _etapa_inicio("rede", 38)
     etapa_ok = True
 
     # ── 1. Habilitar serviços de Descoberta de Rede ─────────────────────────
@@ -805,32 +878,35 @@ def _etapa_rede() -> bool:
     reg_path = r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
     _run_cmd(f'reg add "{reg_path}" /v "AllowInsecureGuestAuth" /t REG_DWORD /d 1 /f', label="Permitir Logon de Convidado Inseguro")
     
-    _etapa_fim("rede", etapa_ok, 80)
+    _etapa_fim("rede", etapa_ok, 58)
     return etapa_ok
 
 
 def _etapa_smb() -> bool:
-    _etapa_inicio("smb", 82)
-    etapa_ok = True
+    _etapa_inicio("smb", 60)
 
+    # O Registro é o que de fato define a assinatura SMB e funciona sempre (até
+    # no Sandbox). O cmdlet Set-SmbClientConfiguration é apenas um atalho
+    # redundante: se falhar (ex.: serviço LanmanWorkstation indisponível no
+    # Sandbox) não invalidamos a etapa — só registramos aviso.
     _log("\n  > Via PowerShell (Set-SmbClientConfiguration)...", "muted")
     if not _run_cmd(
         'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command '
         '"Set-SmbClientConfiguration -RequireSecuritySignature $false -Force"',
         label="Set-SmbClientConfiguration RequireSecuritySignature=False",
     ):
-        etapa_ok = False
+        _log("  ⚠  Cmdlet SMB indisponível (comum no Sandbox). Aplicando via Registro.", "warn")
 
     _log("\n  > Via Registro do Windows...", "muted")
     base = r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
-    if not _run_cmd(f'reg add "{base}" /v EnableSecuritySignature /t REG_DWORD /d 0 /f',
-                    label="Registro: EnableSecuritySignature = 0"):
-        etapa_ok = False
-    if not _run_cmd(f'reg add "{base}" /v RequireSecuritySignature /t REG_DWORD /d 0 /f',
-                    label="Registro: RequireSecuritySignature = 0"):
-        etapa_ok = False
+    ok_reg1 = _run_cmd(f'reg add "{base}" /v EnableSecuritySignature /t REG_DWORD /d 0 /f',
+                       label="Registro: EnableSecuritySignature = 0")
+    ok_reg2 = _run_cmd(f'reg add "{base}" /v RequireSecuritySignature /t REG_DWORD /d 0 /f',
+                       label="Registro: RequireSecuritySignature = 0")
 
-    _etapa_fim("smb", etapa_ok, 88)
+    # Sucesso da etapa = configuração aplicada no Registro (fonte da verdade).
+    etapa_ok = ok_reg1 and ok_reg2
+    _etapa_fim("smb", etapa_ok, 64)
     return etapa_ok
 
 
@@ -839,12 +915,12 @@ def _etapa_usuarios() -> bool:
     Usa o módulo Microsoft.PowerShell.LocalAccounts e referencia o grupo de
     administradores pelo SID well-known (S-1-5-32-544), funcionando em Windows
     PT-BR ou EN. A conta interna de Administrador é localizada pelo SID …-500."""
-    _etapa_inicio("usuarios", 90)
+    _etapa_inicio("usuarios", 66)
     etapa_ok = True
 
     if not USUARIOS:
         _log("  Nenhum usuário configurado.", "muted")
-        _etapa_fim("usuarios", True, 95)
+        _etapa_fim("usuarios", True, 72)
         return True
 
     def _esc(s: str) -> str:
@@ -910,7 +986,7 @@ def _etapa_usuarios() -> bool:
         ps_file.write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8-sig")
     except Exception as exc:
         _log(f"  ✗  Falha ao gerar script de usuários: {exc}", "err")
-        _etapa_fim("usuarios", False, 95)
+        _etapa_fim("usuarios", False, 72)
         return False
 
     _log("\n  👥  Criando/atualizando usuários locais...", "info")
@@ -920,12 +996,100 @@ def _etapa_usuarios() -> bool:
     ):
         etapa_ok = False
 
-    _etapa_fim("usuarios", etapa_ok, 95)
+    _etapa_fim("usuarios", etapa_ok, 72)
     return etapa_ok
 
 
+# Apps removidos na otimização para TODOS os usuários. Mantido enxuto a pedido:
+# somente a família Xbox. Padrões aceitam curinga (*).
+# Nada essencial é tocado (Loja, Calculadora, Fotos, Terminal, Paint, Notepad…).
+_BLOATWARE: List[str] = [
+    "Microsoft.Xbox*",        # Xbox (app, overlays, identity, TCUI, Game Bar…)
+    "Microsoft.GamingApp",    # App Xbox (novo)
+]
+
+
+def _remover_bloatware() -> None:
+    """Remove apps inúteis pré-instalados para TODOS os usuários e os
+    'deprovisiona' (para não voltarem em novos perfis/usuários). Best-effort:
+    apps que o Windows protege simplesmente falham e são ignorados."""
+    _log("  > Removendo aplicativos inúteis (bloatware)...", "muted")
+
+    apps_ps = ",".join(f"'{a}'" for a in _BLOATWARE)
+    linhas = [
+        "$ErrorActionPreference = 'SilentlyContinue'",
+        f"$apps = @({apps_ps})",
+        "foreach ($a in $apps) {",
+        "  Get-AppxPackage -AllUsers -Name $a | ForEach-Object {",
+        "    try {",
+        "      Remove-AppxPackage -Package $_.PackageFullName -AllUsers -ErrorAction Stop",
+        "      Write-Host \"  [-] Removido: $($_.Name)\"",
+        "    } catch { Write-Host \"  [=] Mantido (protegido): $($_.Name)\" }",
+        "  }",
+        "  Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like $a } | ForEach-Object {",
+        "    try {",
+        "      Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction Stop | Out-Null",
+        "      Write-Host \"  [-] Deprovisionado: $($_.DisplayName)\"",
+        "    } catch {}",
+        "  }",
+        "}",
+    ]
+
+    script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    ps_file = script_dir / "remover_bloatware.ps1"
+    try:
+        ps_file.write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8-sig")
+    except Exception as exc:
+        _log(f"  ⚠  Falha ao gerar script de remoção: {exc}", "warn")
+        return
+
+    _run_cmd(
+        f'powershell -NoProfile -ExecutionPolicy Bypass -File "{ps_file}"',
+        label="Remover bloatware (todos os usuários)", timeout=600,
+    )
+
+
+def _remover_onedrive() -> None:
+    """Desinstala o OneDrive — somente se ainda estiver instalado.
+    O OneDrive é por-usuário, então a desinstalação roda no contexto do usuário
+    logado (onde ele realmente está). Não apaga arquivos locais do usuário."""
+    sysroot = os.environ.get("SystemRoot", r"C:\Windows")
+    candidatos = [
+        Path(sysroot) / "System32" / "OneDriveSetup.exe",
+        Path(sysroot) / "SysWOW64" / "OneDriveSetup.exe",
+    ]
+    setup = next((s for s in candidatos if s.exists()), None)
+
+    if setup is None:
+        _log("  ℹ  OneDrive não encontrado (já desinstalado). Pulando.", "muted")
+        return
+
+    _log("  > Desinstalando OneDrive...", "muted")
+    linhas = [
+        "@echo off",
+        "taskkill /f /im OneDrive.exe >nul 2>&1",
+        f'"{setup}" /uninstall',
+    ]
+
+    info = _logged_user()
+    if info:
+        script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        cmd_file = script_dir / "remover_onedrive.cmd"
+        try:
+            cmd_file.write_text("\r\n".join(linhas) + "\r\n", encoding="ascii")
+            _run_as_logged_user(str(cmd_file), label="Desinstalar OneDrive (usuário logado)")
+        except Exception as exc:
+            _log(f"  ⚠  Falha ao desinstalar OneDrive: {exc}", "warn")
+    else:
+        # Sem usuário logado resolvido: roda no contexto atual (Administrator).
+        _run_cmd("taskkill /f /im OneDrive.exe", label="Encerrar OneDrive")
+        _run_cmd(f'"{setup}" /uninstall', label="Desinstalar OneDrive")
+
+
 def _etapa_otimizacao() -> bool:
-    _etapa_inicio("otimizacao", 96)
+    _etapa_inicio("otimizacao", 82)
     _log("\n  ⚡  OTIMIZAÇÃO E LIMPEZA DO WINDOWS...", "info")
 
     acoes_ok = 0
@@ -961,18 +1125,46 @@ def _etapa_otimizacao() -> bool:
     bgapps     = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications"
     storage    = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\StorageSense\\Parameters\\StoragePolicy"
     winmetrics = f"{base}\\Control Panel\\Desktop\\WindowMetrics"
+    desktop    = f"{base}\\Control Panel\\Desktop"
+    visualfx   = f"{base}\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects"
 
     _log("  > Aplicando ajustes visuais e de barra de tarefas no usuário logado...", "muted")
-    # Animações de janela desativadas (preserva sombras/seleção)
-    _run_cmd(f'reg add "{winmetrics}" /v MinAnimate /t REG_SZ /d 0 /f', label="Sem animações de janela")
-    # Transparência desativada
-    _run_cmd(f'reg add "{themes}" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Sem transparência")
-    # Modo escuro (sistema + apps)
+
+    # ── Acessibilidade > Efeitos Visuais: EFEITOS DE TRANSPARÊNCIA = OFF ──────
+    _run_cmd(f'reg add "{themes}" /v EnableTransparency /t REG_DWORD /d 0 /f', label="Efeitos de transparência: OFF")
+
+    # ── Acessibilidade > Efeitos Visuais: EFEITOS DE ANIMAÇÃO = OFF ───────────
+    # Máxima eficiência: replica "Ajustar para melhor desempenho" do Windows.
+    #   • VisualFXSetting=2  → master "melhor desempenho"
+    #   • UserPreferencesMask 9012038010000000 → desliga fades/animações de
+    #     menus, controles, listas etc. (é o que o Windows grava nesse modo)
+    #   • MinAnimate=0       → animação de minimizar/maximizar janela
+    #   • TaskbarAnimations=0→ animações da barra de tarefas
+    #   • DragFullWindows=0  → não desenhar conteúdo da janela ao arrastar
+    #   • ListviewAlphaSelect / ListviewShadow=0 → seleção translúcida e sombras
+    _run_cmd(f'reg add "{visualfx}" /v VisualFXSetting /t REG_DWORD /d 2 /f', label="Efeitos visuais: melhor desempenho")
+    _run_cmd(f'reg add "{desktop}" /v UserPreferencesMask /t REG_BINARY /d 9012038010000000 /f', label="Efeitos de animação: OFF (máscara)")
+    _run_cmd(f'reg add "{winmetrics}" /v MinAnimate /t REG_SZ /d 0 /f', label="Animação de janela: OFF")
+    _run_cmd(f'reg add "{advanced}" /v TaskbarAnimations /t REG_DWORD /d 0 /f', label="Animações da barra de tarefas: OFF")
+    _run_cmd(f'reg add "{desktop}" /v DragFullWindows /t REG_SZ /d 0 /f', label="Conteúdo ao arrastar: OFF")
+    _run_cmd(f'reg add "{advanced}" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f', label="Seleção translúcida: OFF")
+    _run_cmd(f'reg add "{advanced}" /v ListviewShadow /t REG_DWORD /d 0 /f', label="Sombras de ícones: OFF")
+
+    # ── Modo escuro (sistema + apps) ─────────────────────────────────────────
     _run_cmd(f'reg add "{themes}" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f', label="Modo escuro (sistema)")
     _run_cmd(f'reg add "{themes}" /v AppsUseLightTheme /t REG_DWORD /d 0 /f', label="Modo escuro (apps)")
-    # Barra de tarefas: ocultar pesquisa e botão de Visão de Tarefas
-    _run_cmd(f'reg add "{search}" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Ocultar caixa de pesquisa")
-    _run_cmd(f'reg add "{advanced}" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Desativar Visão de Tarefas")
+
+    # ── Personalização > Barra de Tarefas ────────────────────────────────────
+    #   • SearchboxTaskbarMode=0 → SEMPRE ocultar a Pesquisa
+    #   • ShowTaskViewButton=0   → ocultar Visão de Tarefas
+    #   • TaskbarDa=0            → ocultar Widgets (por usuário)
+    #   • Dsh\AllowNewsAndInterests=0 → desativa Widgets a nível de máquina (reforço)
+    _run_cmd(f'reg add "{search}" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f', label="Pesquisa na barra: SEMPRE oculta")
+    _run_cmd(f'reg add "{advanced}" /v ShowTaskViewButton /t REG_DWORD /d 0 /f', label="Visão de Tarefas: OFF")
+    _run_cmd(f'reg add "{advanced}" /v TaskbarDa /t REG_DWORD /d 0 /f', label="Widgets: OFF (usuário)")
+    _run_cmd(r'reg add "HKLM\SOFTWARE\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f', label="Widgets: OFF (máquina)")
+
+    # ── Outros ───────────────────────────────────────────────────────────────
     # Mostrar PERCENTUAL DA BATERIA na barra de tarefas (notebooks)
     _run_cmd(f'reg add "{advanced}" /v IsBatteryPercentageEnabled /t REG_DWORD /d 1 /f', label="Mostrar % da bateria")
     # Apps em segundo plano desativados
@@ -1011,7 +1203,7 @@ def _etapa_otimizacao() -> bool:
             f'for /d %x in ("{folder}\\*") do @rd /s /q "%x" >nul 2>&1',
         ):
             try:
-                subprocess.run(c, shell=True, capture_output=True, timeout=120)
+                subprocess.run(c, shell=True, capture_output=True, timeout=120, creationflags=_NO_WINDOW)
             except subprocess.TimeoutExpired:
                 _log(f"  ⚠  Limpeza demorou demais em {folder} (arquivos em uso).", "warn")
 
@@ -1030,7 +1222,12 @@ def _etapa_otimizacao() -> bool:
     _run_cmd("net start wuauserv", label="Reiniciar Windows Update", timeout=15)
     acoes_ok += 1
 
-    # ── 6. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
+    # ── 6. Remoção de bloatware (Xbox) + OneDrive ─────────────────────────────
+    _remover_bloatware()
+    _remover_onedrive()
+    acoes_ok += 1
+
+    # ── 7. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
     _log("  > Aplicando alterações e reiniciando o Explorer no usuário logado...", "muted")
     _refresh_user_session(restart_explorer=True, clear_recycle=True)
     acoes_ok += 1
@@ -1045,15 +1242,138 @@ def _etapa_otimizacao() -> bool:
     _log(f"      Ações executadas: {acoes_ok}", "muted")
     _log(f"      Espaço liberado estimado: {liberado_mb:.2f} MB", "muted")
 
-    _etapa_fim("otimizacao", True, 100)
+    _etapa_fim("otimizacao", True, 90)
     return True
+
+
+def _etapa_impressora() -> bool:
+    """Instala uma impressora de rede por IP direto (porta TCP/IP).
+    Configuração vem de IMPRESSORA (config.json). O driver é obtido via
+    Windows Update / catálogo nativo do Windows no momento da instalação.
+    Usa cmdlets do módulo PrintManagement (Add-PrinterPort/Add-Printer)."""
+    _etapa_inicio("impressora", 74)
+
+    if not IMPRESSORA or not IMPRESSORA.get("habilitar"):
+        _log("  Impressora desabilitada na configuração. Pulando...", "muted")
+        _etapa_fim("impressora", True, 80)
+        return True
+
+    nome = IMPRESSORA.get("nome", "Impressora de Rede")
+    ip = (IMPRESSORA.get("ip") or "").strip()
+    padrao = bool(IMPRESSORA.get("padrao"))
+
+    if not ip:
+        _log("  ⚠  IP da impressora não informado no config.json. Pulando...", "warn")
+        _etapa_fim("impressora", False, 80)
+        return False
+
+    porta = f"IP_{ip}"
+    _log(f"\n  🖨  Instalando impressora '{nome}' em {ip}...", "info")
+
+    # Garante o serviço de Spooler ativo (no Sandbox costuma vir parado/manual).
+    _run_cmd("sc config Spooler start= auto", label="Spooler → automático")
+    _run_cmd("net start Spooler", label="Iniciar Spooler")
+
+    def _esc(s: str) -> str:
+        return s.replace("'", "''")
+
+    # PowerShell idempotente:
+    #  1. cria a porta TCP/IP se não existir
+    #  2. tenta resolver o driver pelo nome; se não houver, dispara a busca do
+    #     Windows Update (RICOH) e tenta de novo
+    #  3. cria a impressora (ou atualiza a porta se já existir)
+    #  4. opcionalmente define como padrão
+    ps = (
+        "$ErrorActionPreference = 'Stop'; "
+        f"$nome = '{_esc(nome)}'; $ip = '{_esc(ip)}'; $porta = '{_esc(porta)}'; "
+        # Porta TCP/IP
+        "if (-not (Get-PrinterPort -Name $porta -ErrorAction SilentlyContinue)) { "
+        "  Add-PrinterPort -Name $porta -PrinterHostAddress $ip; "
+        "  Write-Host \"  [+] Porta TCP/IP criada: $porta\" "
+        "} else { Write-Host \"  [=] Porta ja existe: $porta\" }; "
+        # Driver: usa o do sistema; se ausente, força varredura do Windows Update
+        "$drv = Get-PrinterDriver -Name $nome -ErrorAction SilentlyContinue; "
+        "if (-not $drv) { "
+        "  Write-Host '  [i] Driver nao encontrado localmente. Buscando no Windows Update...'; "
+        "  try { Add-PrinterDriver -Name $nome -ErrorAction Stop; "
+        "        $drv = Get-PrinterDriver -Name $nome -ErrorAction SilentlyContinue } catch {} "
+        "}; "
+        "if (-not $drv) { "
+        "  Write-Host '  [!] Driver da impressora nao disponivel. Instale o driver RICOH e rode novamente.'; "
+        "  exit 2 "
+        "}; "
+        # Impressora
+        "if (Get-Printer -Name $nome -ErrorAction SilentlyContinue) { "
+        "  Set-Printer -Name $nome -PortName $porta; "
+        "  Write-Host \"  [*] Impressora atualizada: $nome\" "
+        "} else { "
+        "  Add-Printer -Name $nome -DriverName $nome -PortName $porta; "
+        "  Write-Host \"  [*] Impressora instalada: $nome\" "
+        "}; "
+        + (
+            "$p=New-Object -ComObject WScript.Network; "
+            "$p.SetDefaultPrinter($nome); "
+            "Write-Host \"  [*] Definida como padrao: $nome\"; "
+            if padrao else ""
+        )
+    )
+
+    cmd = f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps}"'
+    ok = _run_cmd(cmd, label=f"Instalar impressora {nome}", timeout=300)
+
+    _etapa_fim("impressora", ok, 80)
+    return ok
+
+
+def _etapa_integridade() -> bool:
+    """Verificação de integridade do sistema, executada ao final do setup.
+
+    Modo (config.json → integridade.modo):
+      • "rapido"   (padrão): apenas sfc /scannow — repara arquivos do sistema
+                    usando o armazenamento de componentes local. Bem mais rápido.
+      • "completo": DISM /RestoreHealth (contata o Windows Update e pode demorar
+                    bastante) + sfc /scannow. Use só quando suspeitar que o
+                    próprio armazenamento de componentes está corrompido."""
+    _etapa_inicio("integridade", 92)
+
+    if INTEGRIDADE and not INTEGRIDADE.get("habilitar", True):
+        _log("  Verificação de integridade desabilitada na configuração. Pulando...", "muted")
+        _etapa_fim("integridade", True, 100)
+        return True
+
+    modo = str(INTEGRIDADE.get("modo", "rapido")).lower()
+    etapa_ok = True
+    _log("\n  🔧  VERIFICAÇÃO DE INTEGRIDADE DO SISTEMA...", "info")
+
+    # DISM só no modo completo (é a parte lenta — contata o Windows Update).
+    if modo == "completo":
+        _log("  ⏳  Modo COMPLETO (DISM + SFC) — pode demorar bastante.", "muted")
+        _log("\n  > DISM /Online /Cleanup-Image /RestoreHealth ...", "muted")
+        if not _run_cmd("DISM /Online /Cleanup-Image /RestoreHealth",
+                        label="DISM RestoreHealth", timeout=2400):
+            etapa_ok = False
+    else:
+        _log("  ⚡  Modo RÁPIDO (apenas SFC). Para reparo profundo, use modo 'completo'.", "muted")
+
+    # SFC repara arquivos protegidos do sistema.
+    _log("\n  > sfc /scannow ...", "muted")
+    # sfc retorna 0 quando não há violações; outros códigos indicam reparos/erros.
+    if not _run_cmd("sfc /scannow", label="SFC ScanNow", timeout=1800):
+        # SFC pode retornar != 0 mesmo tendo reparado com sucesso; apenas registramos.
+        _log("  ⚠  SFC retornou código diferente de 0 (verifique o CBS.log).", "warn")
+
+    _log("\n  ✅  Verificação de integridade concluída.", "ok")
+    _etapa_fim("integridade", etapa_ok, 100)
+    return etapa_ok
 
 
 # ══════════════════════════════════════════════
 #  ORQUESTRADOR
 # ══════════════════════════════════════════════
 
-def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_lista: list = None):
+def run_automation(instalar_softwares: bool = True, otimizacao: bool = True,
+                   sw_lista: list = None, instalar_impressora: bool = True,
+                   verificar_integridade: bool = True):
     inicio = datetime.now()
     erros: List[str] = []
 
@@ -1070,7 +1390,7 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
         _log("\n  [INFO] Pulando etapa de downloads conforme solicitado.", "info")
         _etapa_inicio("downloads", 5)
         _log("  Etapa ignorada pelo usuário.", "muted")
-        _etapa_fim("downloads", True, 30)
+        _etapa_fim("downloads", True, 28)
 
     _etapa_wallpaper()          # wallpaper: falha não é crítica
     if not _etapa_rede():
@@ -1082,13 +1402,31 @@ def run_automation(instalar_softwares: bool = True, otimizacao: bool = True, sw_
     if not _etapa_usuarios():
         erros.append("usuarios")
 
-    # Etapa Final: Otimização (Opcional)
+    # Impressora de rede (Opcional)
+    if instalar_impressora:
+        if not _etapa_impressora():
+            erros.append("impressora")
+    else:
+        _log("\n  [INFO] Pulando etapa de impressora.", "info")
+        _etapa_inicio("impressora", 74)
+        _etapa_fim("impressora", True, 80)
+
+    # Otimização (Opcional)
     if otimizacao:
         _etapa_otimizacao()
     else:
         _log("\n  [INFO] Pulando etapa de otimização.", "info")
-        _etapa_inicio("otimizacao", 90)
-        _etapa_fim("otimizacao", True, 100)
+        _etapa_inicio("otimizacao", 82)
+        _etapa_fim("otimizacao", True, 90)
+
+    # Etapa Final: Verificação de Integridade (Opcional, "após execução")
+    if verificar_integridade:
+        if not _etapa_integridade():
+            erros.append("integridade")
+    else:
+        _log("\n  [INFO] Pulando verificação de integridade.", "info")
+        _etapa_inicio("integridade", 92)
+        _etapa_fim("integridade", True, 100)
 
     duracao = int((datetime.now() - inicio).total_seconds())
     _log("\n" + "=" * 52, "muted")

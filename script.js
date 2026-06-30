@@ -3,9 +3,9 @@
 //  SSE + fetch — puro JavaScript, sem dependências
 // ============================================
 
-const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'usuarios', 'otimizacao'];
+const ETAPAS = ['downloads', 'wallpaper', 'rede', 'smb', 'usuarios', 'impressora', 'otimizacao', 'integridade'];
 let _eventSource = null;
-let _swTotal = 5;   // AnyDesk + Chrome + Adobe + Office + WinRAR
+let _swTotal = 7;   // AnyDesk + Chrome + Adobe + Office + WinRAR + Google Drive + Slack
 let _swDone  = 0;
 
 // Mapeia nome do software → id CSS (espaços → hífens)
@@ -26,6 +26,7 @@ function setProgress(pct, text, finalOk) {
 
 function appendLog(msg, tipo) {
   const box  = document.getElementById('logBox');
+  if (!box || msg == null) return;
   // Remove placeholder na primeira mensagem real
   const ph = box.querySelector('.log-placeholder');
   if (ph) ph.remove();
@@ -94,32 +95,38 @@ function updateSwProgress(nome, estado, pct) {
 // ── Handlers de eventos SSE ──────────────────
 
 function handleEvent(event) {
-  const e = JSON.parse(event.data);
+  // Mensagem malformada não pode derrubar o stream inteiro.
+  let e;
+  try { e = JSON.parse(event.data); } catch (_) { return; }
 
-  switch (e.type) {
+  try {
+    switch (e.type) {
 
-    case 'log':
-      appendLog(e.msg, e.tipo);
-      break;
+      case 'log':
+        appendLog(e.msg, e.tipo);
+        break;
 
-    case 'etapa_inicio':
-      setStepState(e.etapa, 'running', 'Executando…');
-      setProgress(e.pct, 'Etapa: ' + e.etapa + '  (' + e.pct + '%)');
-      break;
+      case 'etapa_inicio':
+        setStepState(e.etapa, 'running', 'Executando…');
+        setProgress(e.pct, 'Etapa: ' + e.etapa + '  (' + e.pct + '%)');
+        break;
 
-    case 'etapa_fim':
-      setStepState(e.etapa, e.sucesso ? 'done' : 'error',
-                   e.sucesso ? 'Concluído ✓' : 'Erro ✕');
-      setProgress(e.pct, e.pct + '%');
-      break;
+      case 'etapa_fim':
+        setStepState(e.etapa, e.sucesso ? 'done' : 'error',
+                     e.sucesso ? 'Concluído ✓' : 'Erro ✕');
+        setProgress(e.pct, e.pct + '%');
+        break;
 
-    case 'sw_progress':
-      updateSwProgress(e.nome, e.estado, e.pct || 0);
-      break;
+      case 'sw_progress':
+        updateSwProgress(e.nome, e.estado, e.pct || 0);
+        break;
 
-    case 'setup_fim':
-      _onSetupFim(e.sucesso);
-      break;
+      case 'setup_fim':
+        _onSetupFim(e.sucesso);
+        break;
+    }
+  } catch (_) {
+    // um evento problemático não interrompe os próximos
   }
 }
 
@@ -184,7 +191,7 @@ function iniciarAgente() {
 
   // Reset barras de software
   _swDone = 0;
-  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader', 'Microsoft-365', 'WinRAR'].forEach(id => {
+  ['AnyDesk', 'Google-Chrome', 'Adobe-Acrobat-Reader', 'Microsoft-365', 'WinRAR', 'Google-Drive', 'Slack'].forEach(id => {
     const bar    = document.getElementById('sw-bar-' + id);
     const status = document.getElementById('sw-status-' + id);
     const item   = document.getElementById('sw-' + id);
@@ -198,21 +205,34 @@ function iniciarAgente() {
 
   if (window.location.protocol === 'http:') {
     if (_eventSource) _eventSource.close();
+
+    // Dispara a automação no servidor (uma única vez).
+    let _iniciado = false;
+    const iniciarExecucao = () => {
+      if (_iniciado) return;
+      _iniciado = true;
+      fetch('/api/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instalar_softwares: document.getElementById('chkSoftwares').checked,
+          softwares_selecionados: selectedSW,
+          otimizacao: document.getElementById('chkOtimizacao').checked,
+          instalar_impressora: document.getElementById('chkImpressora').checked,
+          verificar_integridade: document.getElementById('chkIntegridade').checked
+        })
+      }).catch(() => appendLog('[!] Falha ao contactar o servidor Python.', 'err'));
+    };
+
     _eventSource = new EventSource('/api/stream');
     _eventSource.onmessage = handleEvent;
-    _eventSource.onerror   = () => {
-      appendLog('[!] Conexão com servidor perdida.', 'warn');
-    };
-    fetch('/api/execute', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        instalar_softwares: document.getElementById('chkSoftwares').checked,
-        softwares_selecionados: selectedSW,
-        otimizacao: document.getElementById('chkOtimizacao').checked
-      })
-    })
-      .catch(() => appendLog('[!] Falha ao contactar o servidor Python.', 'err'));
+    // IMPORTANTE: só inicia a automação DEPOIS que o stream de log abrir,
+    // senão as primeiras mensagens são emitidas antes do navegador ouvir
+    // (era por isso que a caixa de log ficava vazia).
+    _eventSource.onopen = iniciarExecucao;
+    _eventSource.onerror = () => { /* reconecta sozinho; não polui o log */ };
+    // Rede de segurança: se o onopen não disparar, inicia mesmo assim.
+    setTimeout(iniciarExecucao, 1500);
     return;
   }
 
@@ -293,4 +313,14 @@ document.getElementById('chkOtimizacao').addEventListener('change', (e) => {
   } else {
     step.style.opacity = '0.4';
   }
+});
+
+document.getElementById('chkImpressora').addEventListener('change', (e) => {
+  const step = document.getElementById('step-impressora');
+  step.style.opacity = e.target.checked ? '1' : '0.4';
+});
+
+document.getElementById('chkIntegridade').addEventListener('change', (e) => {
+  const step = document.getElementById('step-integridade');
+  step.style.opacity = e.target.checked ? '1' : '0.4';
 });

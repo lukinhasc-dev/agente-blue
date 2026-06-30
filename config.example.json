@@ -1,0 +1,88 @@
+{
+  "_comentario": "MODELO de configuração do Agente Blue. Copie este arquivo para 'config.json' (ao lado do agente.exe / agente.py) e preencha as senhas. O config.json real NÃO é versionado no Git.",
+
+  "admin": {
+    "_comentario": "Credencial usada para elevar o agente a Administrador.",
+    "usuario": ".\\Administrator",
+    "senha": "DEFINA_A_SENHA_DO_ADMINISTRADOR"
+  },
+
+  "usuarios": [
+    { "nome": "Suporte",       "senha": "DEFINA_A_SENHA", "admin": true, "builtin_admin": false },
+    { "nome": "Administrador", "senha": "DEFINA_A_SENHA", "admin": true, "builtin_admin": true  }
+  ],
+
+  "impressora": {
+    "_comentario": "Impressora de rede instalada por IP direto. Preencha 'ip' com o endereço da impressora. Deixe 'habilitar' como false para pular esta etapa.",
+    "habilitar": true,
+    "nome": "RICOH MP C3003",
+    "ip": "192.168.1.90",
+    "padrao": true
+  },
+
+  "integridade": {
+    "_comentario": "Verificação de integridade ao final. modo='rapido' (só sfc /scannow, recomendado) ou 'completo' (DISM RestoreHealth + sfc, bem mais lento).",
+    "habilitar": true,
+    "modo": "rapido"
+  },
+
+  "softwares": [
+    {
+      "nome": "AnyDesk",
+      "metodo": "local",
+      "filename": "Anydesk.exe",
+      "args": "--install \"C:\\Program Files (x86)\\AnyDesk\" --silent --start-with-win --create-shortcuts --create-desktop-icon",
+      "ok_codes": [0, 11],
+      "detect": "C:\\Program Files (x86)\\AnyDesk\\AnyDesk.exe",
+      "firewall": true
+    },
+    {
+      "nome": "Google Chrome",
+      "metodo": "local",
+      "filename": "ChromeSetup.exe",
+      "args": "/silent /install",
+      "ok_codes": [0, 3010],
+      "detect": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    },
+    {
+      "nome": "Adobe Acrobat Reader",
+      "metodo": "local",
+      "filename": "Reader_br_install.exe",
+      "args": "",
+      "ok_codes": [0, 3010],
+      "detect": "C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\Acrobat.exe"
+    },
+    {
+      "nome": "Microsoft 365",
+      "metodo": "local",
+      "filename": "OfficeSetup.exe",
+      "args": "",
+      "ok_codes": [0],
+      "detect": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE"
+    },
+    {
+      "nome": "WinRAR",
+      "metodo": "local",
+      "filename": "winrar-x64-722br.exe",
+      "args": "/s",
+      "ok_codes": [0],
+      "detect": "C:\\Program Files\\WinRAR\\WinRAR.exe"
+    },
+    {
+      "nome": "Google Drive",
+      "metodo": "local",
+      "filename": "GoogleDriveSetup.exe",
+      "args": "--silent",
+      "ok_codes": [0],
+      "detect": "C:\\Program Files\\Google\\Drive File Stream"
+    },
+    {
+      "nome": "Slack",
+      "metodo": "local",
+      "filename": "SlackSetup.exe",
+      "args": "",
+      "ok_codes": [0],
+      "user_context": true
+    }
+  ]
+}

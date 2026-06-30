@@ -20,7 +20,7 @@ $DistDir    = Join-Path $PSScriptRoot 'dist'
 $OutDir     = Join-Path $DistDir $AppName            # saida onedir (pasta)
 $ExePath    = Join-Path $OutDir "$AppName.exe"
 $OnefileExe = Join-Path $DistDir "$AppName.exe"      # saida onefile (arquivo unico)
-$Assets     = @('index.html', 'script.js', 'style.css', 'bluepay.ico')
+$Assets     = @('index.html', 'script.js', 'style.css', 'bluepay-ico.ico', 'config.json')
 
 if ($AssetsOnly -and $Onefile) {
     Write-Host " [ERRO] -AssetsOnly nao se aplica ao onefile (assets ficam embutidos no exe)." -ForegroundColor Red

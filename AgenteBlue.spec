@@ -14,9 +14,11 @@ import os
 ONEFILE = os.environ.get('AGENTEBLUE_ONEFILE') == '1'
 
 # Assets embutidos (no onedir servem de fallback; no onefile sao a unica copia).
-datas = [(f, '.') for f in ('index.html', 'script.js', 'style.css') if os.path.exists(f)]
-if os.path.exists('bluepay.ico'):
-    datas.append(('bluepay.ico', '.'))
+# config.json embutido e usado como FALLBACK: o codigo procura primeiro um
+# config.json externo (ao lado do exe), editavel sem recompilar.
+datas = [(f, '.') for f in ('index.html', 'script.js', 'style.css', 'config.json') if os.path.exists(f)]
+if os.path.exists('bluepay-ico.ico'):
+    datas.append(('bluepay-ico.ico', '.'))
 
 # Instaladores da pasta .exe\ embutidos no executavel (build autossuficiente:
 # um unico AgenteBlue.exe instala tudo sem pasta externa). Em runtime o codigo
@@ -31,7 +33,7 @@ import glob as _glob
 for _wp in _glob.glob('Fundo de Tela.*'):
     datas.append((_wp, '.'))
 
-icon_file = 'bluepay.ico' if os.path.exists('bluepay.ico') else None
+icon_file = 'bluepay-ico.ico' if os.path.exists('bluepay-ico.ico') else None
 
 a = Analysis(
     ['agente.py'],
@@ -63,7 +65,7 @@ if ONEFILE:
         upx=True,
         upx_exclude=[],
         runtime_tmpdir=None,
-        console=True,
+        console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
@@ -84,7 +86,7 @@ else:
         bootloader_ignore_signals=False,
         strip=False,
         upx=True,
-        console=True,
+        console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
