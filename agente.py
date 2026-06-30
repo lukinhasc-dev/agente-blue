@@ -966,30 +966,12 @@ def _etapa_usuarios() -> bool:
     return etapa_ok
 
 
-# Apps "inúteis" pré-instalados removidos na otimização. Lista CURADA: só
-# bloatware (jogos, Xbox, Bing, Skype etc.). Nada essencial (Loja, Calculadora,
-# Fotos, Terminal, Paint, Notepad, Recorte, Câmera) entra aqui.
-# Padrões aceitam curinga (*) — ex.: 'Microsoft.Xbox*' cobre toda a família Xbox.
+# Apps removidos na otimização para TODOS os usuários. Mantido enxuto a pedido:
+# somente a família Xbox. Padrões aceitam curinga (*).
+# Nada essencial é tocado (Loja, Calculadora, Fotos, Terminal, Paint, Notepad…).
 _BLOATWARE: List[str] = [
-    "Microsoft.Xbox*",                      # Xbox (app, overlays, identity, TCUI…)
-    "Microsoft.GamingApp",                  # Xbox / Game Bar (novo)
-    "Microsoft.ZuneMusic",                  # Groove Música
-    "Microsoft.ZuneVideo",                  # Filmes e TV
-    "Microsoft.BingNews",                   # Notícias
-    "Microsoft.BingWeather",                # Clima
-    "Microsoft.MicrosoftSolitaireCollection",  # Coleção Solitaire
-    "Microsoft.People",                     # Pessoas
-    "Microsoft.WindowsFeedbackHub",         # Hub de Comentários
-    "Microsoft.GetHelp",                    # Obter Ajuda
-    "Microsoft.Getstarted",                 # Dicas
-    "Microsoft.Microsoft3DViewer",          # Visualizador 3D
-    "Microsoft.MixedReality.Portal",        # Realidade Mista
-    "Microsoft.SkypeApp",                   # Skype
-    "Microsoft.WindowsMaps",                # Mapas
-    "Microsoft.MicrosoftOfficeHub",         # "Obter Office" / Office Hub
-    "Clipchamp.Clipchamp",                  # Clipchamp
-    "Microsoft.PowerAutomateDesktop",       # Power Automate
-    "MicrosoftTeams",                       # Teams pessoal (não o do Office 365)
+    "Microsoft.Xbox*",        # Xbox (app, overlays, identity, TCUI, Game Bar…)
+    "Microsoft.GamingApp",    # App Xbox (novo)
 ]
 
 
@@ -1032,6 +1014,44 @@ def _remover_bloatware() -> None:
         f'powershell -NoProfile -ExecutionPolicy Bypass -File "{ps_file}"',
         label="Remover bloatware (todos os usuários)", timeout=600,
     )
+
+
+def _remover_onedrive() -> None:
+    """Desinstala o OneDrive — somente se ainda estiver instalado.
+    O OneDrive é por-usuário, então a desinstalação roda no contexto do usuário
+    logado (onde ele realmente está). Não apaga arquivos locais do usuário."""
+    sysroot = os.environ.get("SystemRoot", r"C:\Windows")
+    candidatos = [
+        Path(sysroot) / "System32" / "OneDriveSetup.exe",
+        Path(sysroot) / "SysWOW64" / "OneDriveSetup.exe",
+    ]
+    setup = next((s for s in candidatos if s.exists()), None)
+
+    if setup is None:
+        _log("  ℹ  OneDrive não encontrado (já desinstalado). Pulando.", "muted")
+        return
+
+    _log("  > Desinstalando OneDrive...", "muted")
+    linhas = [
+        "@echo off",
+        "taskkill /f /im OneDrive.exe >nul 2>&1",
+        f'"{setup}" /uninstall',
+    ]
+
+    info = _logged_user()
+    if info:
+        script_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        cmd_file = script_dir / "remover_onedrive.cmd"
+        try:
+            cmd_file.write_text("\r\n".join(linhas) + "\r\n", encoding="ascii")
+            _run_as_logged_user(str(cmd_file), label="Desinstalar OneDrive (usuário logado)")
+        except Exception as exc:
+            _log(f"  ⚠  Falha ao desinstalar OneDrive: {exc}", "warn")
+    else:
+        # Sem usuário logado resolvido: roda no contexto atual (Administrator).
+        _run_cmd("taskkill /f /im OneDrive.exe", label="Encerrar OneDrive")
+        _run_cmd(f'"{setup}" /uninstall', label="Desinstalar OneDrive")
 
 
 def _etapa_otimizacao() -> bool:
@@ -1168,8 +1188,9 @@ def _etapa_otimizacao() -> bool:
     _run_cmd("net start wuauserv", label="Reiniciar Windows Update", timeout=15)
     acoes_ok += 1
 
-    # ── 6. Remoção de bloatware (apps inúteis pré-instalados) ─────────────────
+    # ── 6. Remoção de bloatware (Xbox) + OneDrive ─────────────────────────────
     _remover_bloatware()
+    _remover_onedrive()
     acoes_ok += 1
 
     # ── 7. Aplicar tudo no usuário logado: tema/wallpaper + barra + lixeira ────
