@@ -21,8 +21,9 @@
   },
 
   "integridade": {
-    "_comentario": "Verificação de integridade do sistema (sfc /scannow + DISM RestoreHealth) ao final. Pode demorar bastante (10-30 min).",
-    "habilitar": true
+    "_comentario": "Verificação de integridade ao final. modo='rapido' (só sfc /scannow, recomendado) ou 'completo' (DISM RestoreHealth + sfc, bem mais lento).",
+    "habilitar": true,
+    "modo": "rapido"
   },
 
   "softwares": [

@@ -108,7 +108,14 @@ IMPRESSORA: dict = _CONFIG.get("impressora", {})
 # ─────────────────────────────────────────────
 INTEGRIDADE: dict = _CONFIG.get("integridade", {"habilitar": True})
 
-_LOG_FILE = Path(os.environ.get("TEMP", "C:\\Temp")) / "agente_blue.log"
+# Log em local FIXO e legível por qualquer usuário (não depende do %TEMP% do
+# Administrador, que muda ao elevar). Facilita o diagnóstico.
+try:
+    _LOG_DIR = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AgenteBlue"
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _LOG_DIR = Path(os.environ.get("TEMP", r"C:\Temp"))
+_LOG_FILE = _LOG_DIR / "agente_blue.log"
 
 # Wallpaper: procura o arquivo "Fundo de Tela.*" na raiz do executável / script
 _WALLPAPER_NAMES = [
@@ -877,25 +884,28 @@ def _etapa_rede() -> bool:
 
 def _etapa_smb() -> bool:
     _etapa_inicio("smb", 60)
-    etapa_ok = True
 
+    # O Registro é o que de fato define a assinatura SMB e funciona sempre (até
+    # no Sandbox). O cmdlet Set-SmbClientConfiguration é apenas um atalho
+    # redundante: se falhar (ex.: serviço LanmanWorkstation indisponível no
+    # Sandbox) não invalidamos a etapa — só registramos aviso.
     _log("\n  > Via PowerShell (Set-SmbClientConfiguration)...", "muted")
     if not _run_cmd(
         'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command '
         '"Set-SmbClientConfiguration -RequireSecuritySignature $false -Force"',
         label="Set-SmbClientConfiguration RequireSecuritySignature=False",
     ):
-        etapa_ok = False
+        _log("  ⚠  Cmdlet SMB indisponível (comum no Sandbox). Aplicando via Registro.", "warn")
 
     _log("\n  > Via Registro do Windows...", "muted")
     base = r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
-    if not _run_cmd(f'reg add "{base}" /v EnableSecuritySignature /t REG_DWORD /d 0 /f',
-                    label="Registro: EnableSecuritySignature = 0"):
-        etapa_ok = False
-    if not _run_cmd(f'reg add "{base}" /v RequireSecuritySignature /t REG_DWORD /d 0 /f',
-                    label="Registro: RequireSecuritySignature = 0"):
-        etapa_ok = False
+    ok_reg1 = _run_cmd(f'reg add "{base}" /v EnableSecuritySignature /t REG_DWORD /d 0 /f',
+                       label="Registro: EnableSecuritySignature = 0")
+    ok_reg2 = _run_cmd(f'reg add "{base}" /v RequireSecuritySignature /t REG_DWORD /d 0 /f',
+                       label="Registro: RequireSecuritySignature = 0")
 
+    # Sucesso da etapa = configuração aplicada no Registro (fonte da verdade).
+    etapa_ok = ok_reg1 and ok_reg2
     _etapa_fim("smb", etapa_ok, 64)
     return etapa_ok
 
@@ -1260,6 +1270,10 @@ def _etapa_impressora() -> bool:
     porta = f"IP_{ip}"
     _log(f"\n  🖨  Instalando impressora '{nome}' em {ip}...", "info")
 
+    # Garante o serviço de Spooler ativo (no Sandbox costuma vir parado/manual).
+    _run_cmd("sc config Spooler start= auto", label="Spooler → automático")
+    _run_cmd("net start Spooler", label="Iniciar Spooler")
+
     def _esc(s: str) -> str:
         return s.replace("'", "''")
 
@@ -1313,8 +1327,13 @@ def _etapa_impressora() -> bool:
 
 def _etapa_integridade() -> bool:
     """Verificação de integridade do sistema, executada ao final do setup.
-    Roda DISM /RestoreHealth (repara a imagem de componentes) e em seguida
-    sfc /scannow (repara arquivos do sistema). Operação demorada (10-30 min)."""
+
+    Modo (config.json → integridade.modo):
+      • "rapido"   (padrão): apenas sfc /scannow — repara arquivos do sistema
+                    usando o armazenamento de componentes local. Bem mais rápido.
+      • "completo": DISM /RestoreHealth (contata o Windows Update e pode demorar
+                    bastante) + sfc /scannow. Use só quando suspeitar que o
+                    próprio armazenamento de componentes está corrompido."""
     _etapa_inicio("integridade", 92)
 
     if INTEGRIDADE and not INTEGRIDADE.get("habilitar", True):
@@ -1322,20 +1341,24 @@ def _etapa_integridade() -> bool:
         _etapa_fim("integridade", True, 100)
         return True
 
+    modo = str(INTEGRIDADE.get("modo", "rapido")).lower()
     etapa_ok = True
     _log("\n  🔧  VERIFICAÇÃO DE INTEGRIDADE DO SISTEMA...", "info")
-    _log("  ⏳  Esta etapa pode demorar bastante (10-30 min). Aguarde.", "muted")
 
-    # 1. DISM repara o armazenamento de componentes (base para o SFC funcionar).
-    _log("\n  > DISM /Online /Cleanup-Image /RestoreHealth ...", "muted")
-    if not _run_cmd("DISM /Online /Cleanup-Image /RestoreHealth",
-                    label="DISM RestoreHealth", timeout=2400):
-        etapa_ok = False
+    # DISM só no modo completo (é a parte lenta — contata o Windows Update).
+    if modo == "completo":
+        _log("  ⏳  Modo COMPLETO (DISM + SFC) — pode demorar bastante.", "muted")
+        _log("\n  > DISM /Online /Cleanup-Image /RestoreHealth ...", "muted")
+        if not _run_cmd("DISM /Online /Cleanup-Image /RestoreHealth",
+                        label="DISM RestoreHealth", timeout=2400):
+            etapa_ok = False
+    else:
+        _log("  ⚡  Modo RÁPIDO (apenas SFC). Para reparo profundo, use modo 'completo'.", "muted")
 
-    # 2. SFC repara arquivos protegidos do sistema usando o armazenamento sadio.
+    # SFC repara arquivos protegidos do sistema.
     _log("\n  > sfc /scannow ...", "muted")
     # sfc retorna 0 quando não há violações; outros códigos indicam reparos/erros.
-    if not _run_cmd("sfc /scannow", label="SFC ScanNow", timeout=2400):
+    if not _run_cmd("sfc /scannow", label="SFC ScanNow", timeout=1800):
         # SFC pode retornar != 0 mesmo tendo reparado com sucesso; apenas registramos.
         _log("  ⚠  SFC retornou código diferente de 0 (verifique o CBS.log).", "warn")
 
